@@ -195,7 +195,7 @@ impl NTupleEvaluator {
 #### 回転4対称変換
 
 ```text
-盤面に対して以下の4つの回転変換を適用し、各変換後のタプルインデックスで重みを引く:
+盤面に対して以下の4つの時計回り回転変換を適用し、各変換後のタプルインデックスで重みを引く:
 1. 恒等変換（そのまま）
 2. 90度回転
 3. 180度回転
@@ -204,8 +204,10 @@ impl NTupleEvaluator {
 水平反転系（水平反転 + 0/90/180/270度回転）は、今回採用する
 `TUPLE_PATTERNS` に鏡像相当のパターンを含めることで吸収する。
 
-座標変換関数:
-  rotate90(row, col)  → (col, 7 - row)
+座標変換関数（90度時計回り）:
+  rotate90_cw(row, col)  → (col, 7 - row)
+
+Python実装では `np.rot90(board_grid, -k)` を使って同等の時計回り回転を生成する。
 ```
 
 #### weights.bin デシリアライズ
@@ -563,7 +565,7 @@ class Board:
 class NTupleNetwork:
     """N-Tuple Network 評価関数"""
 
-    # 実際に使用するタプルパターン定義
+    # 実際に使用するタプルパターン定義（想定パターン数: 14）
     TUPLE_PATTERNS: list[list[int]] = [
         [0, 1, 8, 9, 10, 17, 18, 19, 26, 27],
         [0, 1, 8, 9, 18, 27, 36, 45, 54, 63],
@@ -592,28 +594,30 @@ class NTupleNetwork:
         """盤面評価（回転4対称変換を適用して全タプルの重みを合算）"""
         score = 0.0
         board_array = board.to_array(is_black)
-        for sym in self._symmetries(board_array):
+        for sym in NTupleNetwork._symmetries(board_array):
             for i, pattern in enumerate(self.TUPLE_PATTERNS):
-                index = self._pattern_index(sym, pattern)
+                index = NTupleNetwork._pattern_index(sym, pattern)
                 score += self.weights[i][index]
         return score
 
     def update(self, board: Board, is_black: bool, delta: float):
         """重みを更新する（deltaは学習率適用済みの更新量）"""
         board_array = board.to_array(is_black)
-        for sym in self._symmetries(board_array):
+        for sym in NTupleNetwork._symmetries(board_array):
             for i, pattern in enumerate(self.TUPLE_PATTERNS):
-                index = self._pattern_index(sym, pattern)
+                index = NTupleNetwork._pattern_index(sym, pattern)
                 self.weights[i][index] += delta
 
-    def _pattern_index(self, board_array: np.ndarray, pattern: list[int]) -> int:
+    @staticmethod
+    def _pattern_index(board_array: np.ndarray, pattern: list[int]) -> int:
         """パターンのマス状態から重みインデックスを計算（3進数変換）"""
         index = 0
         for pos in pattern:
             index = index * 3 + board_array[pos]
         return index
 
-    def _symmetries(self, board_array: np.ndarray) -> list[np.ndarray]:
+    @staticmethod
+    def _symmetries(board_array: np.ndarray) -> list[np.ndarray]:
         """回転4対称変換を返す（Rust側と同一の変換）"""
 ```
 

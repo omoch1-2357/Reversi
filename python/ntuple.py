@@ -11,6 +11,7 @@ class NTupleNetwork:
     """N-Tuple Network evaluation model."""
 
     # Fixed tuple positions over a row-major flattened 8x8 board.
+    # Expected patterns: 14 (per DESIGN.md 3.3 and REQUIREMENTS.md 5.1).
     TUPLE_PATTERNS: list[list[int]] = [
         [0, 1, 8, 9, 10, 17, 18, 19, 26, 27],
         [0, 1, 8, 9, 18, 27, 36, 45, 54, 63],
@@ -64,7 +65,7 @@ class NTupleNetwork:
 
     @staticmethod
     def _symmetries(board_array: np.ndarray) -> list[np.ndarray]:
-        """Return rotational symmetries (0/90/180/270 degrees)."""
+        """Return clockwise rotational symmetries (0/90/180/270 degrees)."""
         if board_array.size != NUM_SQUARES:
             raise ValueError(
                 f"board_array size must be {NUM_SQUARES}, got {board_array.size}"
@@ -73,5 +74,5 @@ class NTupleNetwork:
         board_grid = board_array.reshape(BOARD_SIZE, BOARD_SIZE)
         transformed: list[np.ndarray] = []
         for turns in range(4):
-            transformed.append(np.rot90(board_grid, turns).flatten())
+            transformed.append(np.rot90(board_grid, -turns).flatten())
         return transformed
