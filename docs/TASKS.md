@@ -9,9 +9,9 @@
 
 ### 1-1. プロジェクト初期設定
 
-- [ ] `rust/` に Cargo ライブラリプロジェクトを作成
-- [ ] `Cargo.toml` に依存関係を追加（`wasm-bindgen`, `serde`, `serde-wasm-bindgen`, `once_cell`）
-- [ ] `wasm-pack build` でビルドが通ることを確認
+- [x] `rust/` に Cargo ライブラリプロジェクトを作成
+- [x] `Cargo.toml` に依存関係を追加（`wasm-bindgen`, `serde`, `serde-wasm-bindgen`, `once_cell`）
+- [x] `wasm-pack build` でビルドが通ることを確認
 
 ### 1-2. `board.rs` — ビットボード盤面ロジック
 
