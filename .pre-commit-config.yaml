@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt (rust)
+        entry: cargo fmt --manifest-path rust/Cargo.toml --all
+        language: system
+        pass_filenames: false
+        files: ^rust/.*\.rs$
