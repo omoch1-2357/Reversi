@@ -199,7 +199,8 @@ fn bitmask_to_indices(mask: u64) -> Vec<u8> {
 fn opponent_of(player: u8) -> u8 {
     match player {
         PLAYER_BLACK => PLAYER_WHITE,
-        _ => PLAYER_BLACK,
+        PLAYER_WHITE => PLAYER_BLACK,
+        _ => unreachable!("invalid player value: {}", player),
     }
 }
 
