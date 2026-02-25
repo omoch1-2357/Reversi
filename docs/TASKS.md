@@ -25,8 +25,8 @@
 
 ### 1-3. `types.rs` — 公開型定義
 
-- [ ] `Position`, `GameState`, `GameResult` を `#[derive(Serialize)]` で定義
-- [ ] `GameState.flipped` / `is_pass` の契約コメント付記
+- [x] `Position`, `GameState`, `GameResult` を `#[derive(Serialize)]` で定義
+- [x] `GameState.flipped` / `is_pass` の契約コメント付記
 
 ### 1-4. `game.rs` — ゲーム進行管理
 
