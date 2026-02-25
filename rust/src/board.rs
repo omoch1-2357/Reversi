@@ -28,6 +28,12 @@ impl Board {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_bitboards(black: u64, white: u64) -> Self {
+        debug_assert_eq!(black & white, 0);
+        Self { black, white }
+    }
+
     /// Returns legal move mask for the given side.
     pub fn legal_moves(&self, is_black: bool) -> u64 {
         let (me, opp) = if is_black {

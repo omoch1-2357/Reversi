@@ -30,13 +30,13 @@
 
 ### 1-4. `game.rs` — ゲーム進行管理
 
-- [ ] `GameInstance` 構造体（`current_player: u8`, `is_pass`, `flipped`, `is_game_over` 等）
-- [ ] `new(level, evaluator)` — 初期化
-- [ ] `place(row, col)` — プレイヤー着手（手番検証含む）
-- [ ] `has_legal_moves_for_current()`, `pass()`, `end_game()`
-- [ ] `do_ai_move()` — 探索＋着手のみ（F-05自動パスは `lib.rs::ai_move()` 側の責務）
-- [ ] `to_game_state()`, `to_game_result()` 変換メソッド
-- [ ] 単体テスト: 初期配置、T-02（非合法手エラー）、T-03（パス発生）、T-04（両者パス終局）、T-05（満盤終局）
+- [x] `GameInstance` 構造体（`current_player: u8`, `is_pass`, `flipped`, `is_game_over` 等）
+- [x] `new(level, evaluator)` — 初期化
+- [x] `place(row, col)` — プレイヤー着手（手番検証含む）
+- [x] `has_legal_moves_for_current()`, `pass()`, `end_game()`
+- [x] `do_ai_move()` — 探索＋着手のみ（F-05自動パスは `lib.rs::ai_move()` 側の責務）
+- [x] `to_game_state()`, `to_game_result()` 変換メソッド
+- [x] 単体テスト: 初期配置、T-02（非合法手エラー）、T-03（パス発生）、T-04（両者パス終局）、T-05（満盤終局）
 
 ---
 
