@@ -42,6 +42,13 @@ Use GitHub Flow as the Git/branch strategy:
 - open a PR back to `main` for review and CI before merge
 - link related Issues in PRs with `Closes #<issue>`
 
+Agent execution rule (mandatory):
+- Do not run write-affecting `git`/`gh` commands without explicit user instruction in the current turn.
+- Explicit instruction is required for: `git checkout|switch|branch|add|commit|push|merge|rebase|cherry-pick|reset|tag` and `gh pr create|edit|merge`, `gh issue create|edit`.
+- Read-only commands are allowed without extra confirmation: `git status`, `git diff`, `git log`, `git show`, `git branch -vv`, `gh pr list/view`.
+- A phase/subtask request alone (for example, `$phase-task-git-flow 1.2`) is treated as implementation/validation scope. Run write-affecting Git/GitHub operations only when the user also explicitly requests them (for example, “commit/push/PR まで実施”).
+- When write-affecting Git/GitHub steps are pending, show the exact planned commands and wait for user approval.
+
 Issue-based workflow (Milestone-driven):
 1. Create a Milestone for each phase.
 2. Create Issues from `docs/TASKS.md` and assign them to that Milestone.
