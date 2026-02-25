@@ -1,0 +1,46 @@
+name: Python Quality
+
+on:
+  pull_request:
+    paths:
+      - "python/**"
+      - "pytest.ini"
+      - ".pre-commit-config.yaml"
+      - ".github/workflows/python-quality.yml"
+      - ".github/workflows/python-check-reusable.yml"
+  push:
+    branches:
+      - "main"
+    paths:
+      - "python/**"
+      - "pytest.ini"
+      - ".pre-commit-config.yaml"
+      - ".github/workflows/python-quality.yml"
+      - ".github/workflows/python-check-reusable.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: python-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    uses: ./.github/workflows/python-check-reusable.yml
+    with:
+      check-name: Format
+      command: python -m ruff format --check python
+      timeout-minutes: 5
+
+  lint:
+    uses: ./.github/workflows/python-check-reusable.yml
+    with:
+      check-name: Lint
+      command: python -m ruff check python
+      timeout-minutes: 5
+
+  test:
+    uses: ./.github/workflows/python-check-reusable.yml
+    with:
+      check-name: Test
+      command: pytest python/tests -q
+      timeout-minutes: 30

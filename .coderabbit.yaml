@@ -33,7 +33,7 @@ reviews:
       enabled: true
     gitleaks:
       enabled: true
-    osv_scanner:
+    osvScanner:
       enabled: true
     actionlint:
       enabled: true
@@ -54,6 +54,13 @@ reviews:
         Check deterministic behavior: same board state + same level must return the same move, with tie-break preferring smaller index.
         Validate timeout and fallback behavior for iterative deepening.
         Flag global state and WASM API contract inconsistencies.
+    - path: "python/**/*.py"
+      instructions: |
+        Focus on correctness and regression risk first.
+        Keep parity with Rust-side game/AI specifications and data contracts.
+        Check deterministic behavior under fixed seeds and avoid hidden mutable/global state.
+        Verify perspective-dependent logic (is_black view), board indexing, and bitboard consistency.
+        Require tests for behavior changes under python/** or an explicit rationale in PR description.
     - path: "docs/**/*.md"
       instructions: |
         Check consistency across REQUIREMENTS.md, DESIGN.md, and TASKS.md.

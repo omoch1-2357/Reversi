@@ -45,13 +45,13 @@
 ### 2-1. プロジェクト初期設定
 
 - [x] `python/` ディレクトリ作成
-- [x] `requirements.txt`（`numpy`, `pytest`）
+- [x] `requirements.txt`（`numpy`, `pytest`, `ruff`）
 
 ### 2-2. `board.py` — 盤面ロジック
 
-- [ ] Rust版と同一仕様のビットボード（`legal_moves`, `place`, `count`, `empty_count`）
-- [ ] `to_array(is_black)`, `copy()`
-- [ ] pytest 単体テスト
+- [x] Rust版と同一仕様のビットボード（`legal_moves`, `place`, `count`, `empty_count`）
+- [x] `to_array(is_black)`, `copy()`
+- [x] pytest 単体テスト
 
 ### 2-3. `ntuple.py` — N-Tuple Network
 
