@@ -43,11 +43,13 @@ Use GitHub Flow as the Git/branch strategy:
 - link related Issues in PRs with `Closes #<issue>`
 
 Agent execution rule (mandatory):
-- Do not run write-affecting `git`/`gh` commands without explicit user instruction in the current turn.
-- Explicit instruction is required for: `git checkout|switch|branch|add|commit|push|merge|rebase|cherry-pick|reset|tag` and `gh pr create|edit|merge`, `gh issue create|edit`.
+- Do not run write-affecting `git`/`gh` commands without explicit user instruction in the current turn, except for the allowed commands listed below.
+- Explicit instruction is required for: `git add|commit|push|merge|rebase|reset|tag` and `gh pr create|edit|merge`.
 - Read-only commands are allowed without extra confirmation: `git status`, `git diff`, `git log`, `git show`, `git branch -vv`, `gh pr list/view`.
-- A phase/subtask request alone (for example, `$phase-task-git-flow 1.2`) is treated as implementation/validation scope. Run write-affecting Git/GitHub operations only when the user also explicitly requests them (for example, “commit/push/PR まで実施”).
-- When write-affecting Git/GitHub steps are pending, show the exact planned commands and wait for user approval.
+- In addition to read-only commands, the following are allowed without extra confirmation: `git branch`, `git switch`, `git checkout`, `git cherry-pick`, and `gh issue` commands.
+- `git checkout` and `git cherry-pick` remain disallowed without explicit user instruction when the purpose is file rollback/discarding local changes.
+- A phase/subtask request alone (for example, `$phase-task-git-flow 1.2`) is treated as implementation/validation scope. Run write-affecting Git/GitHub operations only when the user also explicitly requests them, except for the allowed commands above.
+- When write-affecting Git/GitHub steps that still require explicit instruction are pending, show the exact planned commands and wait for user approval.
 
 Issue-based workflow (Milestone-driven):
 1. Create a Milestone for each phase.
