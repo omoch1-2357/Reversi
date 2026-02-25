@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "ja-JP"
+early_access: false
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: false
+  poem: false
+  in_progress_fortune: false
+  changed_files_summary: true
+  sequence_diagrams: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    drafts: false
+    base_branches:
+      - "main"
+    ignore_title_keywords:
+      - "WIP"
+      - "Draft"
+
+  tools:
+    clippy:
+      enabled: true
+    semgrep:
+      enabled: true
+    opengrep:
+      enabled: true
+    gitleaks:
+      enabled: true
+    osv_scanner:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/target/**"
+    - "!**/coverage/**"
+    - "!**/*.wasm"
+
+  path_instructions:
+    - path: "rust/src/**/*.rs"
+      instructions: |
+        Focus on correctness and regression risk first.
+        Check deterministic behavior: same board state + same level must return the same move, with tie-break preferring smaller index.
+        Validate timeout and fallback behavior for iterative deepening.
+        Flag global state and WASM API contract inconsistencies.
+    - path: "docs/**/*.md"
+      instructions: |
+        Check consistency across REQUIREMENTS.md, DESIGN.md, and TASKS.md.
+        Flag contradictions in API names, state transitions, timeout/performance targets, and test IDs.
+        Prioritize concrete, actionable comments over wording-only suggestions.
+
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: "Use a concise title aligned to scope; prefer Conventional Commit style (e.g., feat(rust): ..., fix(web): ...)."
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - mode: warning
+        name: "Behavior changes need tests"
+        instructions: |
+          If production code changes under rust/src/**, python/**, or web/src/**,
+          require corresponding tests or an explicit reason in the PR description for not adding tests.
+
+chat:
+  auto_reply: true
+  art: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+  learnings:
+    scope: local
