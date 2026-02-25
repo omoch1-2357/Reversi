@@ -1068,7 +1068,7 @@ Reversi/
 │           ├── search.rs        # Searcher, 反復深化, NegaAlpha, 完全読み
 │           └── weights.bin      # 学習済みモデル（include_bytes!対象）
 ├── python/
-│   ├── requirements.txt         # numpy
+│   ├── requirements.txt         # numpy, pytest, ruff
 │   ├── train.py                 # 学習エントリポイント（CLI引数: --games, --alpha等）
 │   ├── board.py                 # Board クラス（Rust同等のビットボード）
 │   ├── ntuple.py                # NTupleNetwork クラス（タプル定義, 評価, 更新）

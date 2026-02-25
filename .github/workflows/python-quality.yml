@@ -4,15 +4,19 @@ on:
   pull_request:
     paths:
       - "python/**"
+      - "pytest.ini"
       - ".pre-commit-config.yaml"
       - ".github/workflows/python-quality.yml"
+      - ".github/workflows/python-check-reusable.yml"
   push:
     branches:
       - "main"
     paths:
       - "python/**"
+      - "pytest.ini"
       - ".pre-commit-config.yaml"
       - ".github/workflows/python-quality.yml"
+      - ".github/workflows/python-check-reusable.yml"
   workflow_dispatch:
 
 concurrency:
@@ -21,76 +25,22 @@ concurrency:
 
 jobs:
   format:
-    name: Format
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: "python/requirements.txt"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r python/requirements.txt
-
-      - name: Run format check
-        run: python -m ruff format --check python
+    uses: ./.github/workflows/python-check-reusable.yml
+    with:
+      check-name: Format
+      command: python -m ruff format --check python
+      timeout-minutes: 5
 
   lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: "python/requirements.txt"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r python/requirements.txt
-
-      - name: Run lint check
-        run: python -m ruff check python
+    uses: ./.github/workflows/python-check-reusable.yml
+    with:
+      check-name: Lint
+      command: python -m ruff check python
+      timeout-minutes: 5
 
   test:
-    name: Test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: "python/requirements.txt"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r python/requirements.txt
-
-      - name: Run tests
-        run: pytest python/tests -q
+    uses: ./.github/workflows/python-check-reusable.yml
+    with:
+      check-name: Test
+      command: pytest python/tests -q
+      timeout-minutes: 30

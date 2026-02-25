@@ -466,7 +466,7 @@ Reversi/
 │       │   └── weights.bin  # 学習済みモデル（include_bytes!対象）
 │       └── types.rs         # 共通型定義
 ├── python/                  # Python 学習パイプライン
-│   ├── requirements.txt
+│   ├── requirements.txt         # numpy, pytest, ruff
 │   ├── train.py             # 学習メインスクリプト
 │   ├── ntuple.py            # N-Tuple Network実装
 │   ├── board.py             # 盤面ロジック（学習用）

@@ -15,6 +15,12 @@ def test_initial_black_legal_moves_are_four_expected_squares() -> None:
     assert board.legal_moves(True) == expected
 
 
+def test_initial_white_legal_moves_are_four_expected_squares() -> None:
+    board = Board()
+    expected = bit(idx(2, 4)) | bit(idx(3, 5)) | bit(idx(4, 2)) | bit(idx(5, 3))
+    assert board.legal_moves(False) == expected
+
+
 def test_place_flips_and_updates_counts_and_empty() -> None:
     board = Board()
     flips = board.place(idx(2, 3), True)
@@ -32,6 +38,17 @@ def test_illegal_place_returns_zero_and_keeps_state() -> None:
     flips = board.place(idx(0, 0), True)
 
     assert flips == 0
+    assert board.black == before_black
+    assert board.white == before_white
+
+
+def test_out_of_range_place_returns_zero_and_keeps_state() -> None:
+    board = Board()
+    before_black = board.black
+    before_white = board.white
+
+    assert board.place(-1, False) == 0
+    assert board.place(64, False) == 0
     assert board.black == before_black
     assert board.white == before_white
 

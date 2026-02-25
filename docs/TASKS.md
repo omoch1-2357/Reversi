@@ -45,7 +45,7 @@
 ### 2-1. プロジェクト初期設定
 
 - [x] `python/` ディレクトリ作成
-- [x] `requirements.txt`（`numpy`, `pytest`）
+- [x] `requirements.txt`（`numpy`, `pytest`, `ruff`）
 
 ### 2-2. `board.py` — 盤面ロジック
 

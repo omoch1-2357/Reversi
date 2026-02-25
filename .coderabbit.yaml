@@ -33,7 +33,7 @@ reviews:
       enabled: true
     gitleaks:
       enabled: true
-    osv_scanner:
+    osvScanner:
       enabled: true
     actionlint:
       enabled: true
