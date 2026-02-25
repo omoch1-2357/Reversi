@@ -187,27 +187,25 @@ impl NTupleEvaluator {
     /// 盤面を手番側視点（current player view）で評価する
     /// is_black=true なら黒にとって有利なほど正、is_black=false なら白にとって有利なほど正
     /// Negamax探索で符号反転と組み合わせて使用する
-    /// 8対称変換を適用し、全タプルの重みを合算する
+    /// 回転4対称変換（0/90/180/270度）を適用し、全タプルの重みを合算する
     pub fn evaluate(&self, board: &Board, is_black: bool) -> f32;
 }
 ```
 
-#### 8対称変換
+#### 回転4対称変換
 
 ```text
-盤面に対して以下の8つの変換を適用し、各変換後のタプルインデックスで重みを引く:
+盤面に対して以下の4つの回転変換を適用し、各変換後のタプルインデックスで重みを引く:
 1. 恒等変換（そのまま）
 2. 90度回転
 3. 180度回転
 4. 270度回転
-5. 水平反転
-6. 水平反転 + 90度回転
-7. 水平反転 + 180度回転
-8. 水平反転 + 270度回転
+
+水平反転系（水平反転 + 0/90/180/270度回転）は、今回採用する
+`TUPLE_PATTERNS` に鏡像相当のパターンを含めることで吸収する。
 
 座標変換関数:
   rotate90(row, col)  → (col, 7 - row)
-  flip_h(row, col)    → (row, 7 - col)
 ```
 
 #### weights.bin デシリアライズ
@@ -565,16 +563,22 @@ class Board:
 class NTupleNetwork:
     """N-Tuple Network 評価関数"""
 
-    # タプルパターン定義（複数パターン）
+    # 実際に使用するタプルパターン定義
     TUPLE_PATTERNS: list[list[int]] = [
-        # 横4マスパターン（例）
-        [0, 1, 2, 3],
-        [8, 9, 10, 11],
-        # 2x3ブロックパターン（例）
-        [0, 1, 2, 8, 9, 10],
-        # 斜めパターン（例）
-        [0, 9, 18, 27],
-        # ... 追加パターン
+        [0, 1, 8, 9, 10, 17, 18, 19, 26, 27],
+        [0, 1, 8, 9, 18, 27, 36, 45, 54, 63],
+        [0, 1, 2, 3, 8, 9, 10, 16, 17, 24],
+        [0, 1, 2, 3, 4, 8, 9, 16, 24, 32],
+        [0, 1, 2, 3, 4, 5, 6, 7, 9, 14],
+        [0, 2, 3, 4, 5, 7, 10, 11, 12, 13],
+        [1, 2, 3, 4, 5, 6, 10, 11, 12, 13],
+        [0, 1, 2, 8, 9, 10, 16, 17, 18],
+        [0, 1, 10, 19, 28, 37, 46, 55, 63],
+        [8, 9, 10, 11, 12, 13, 14, 15],
+        [16, 17, 18, 19, 20, 21, 22, 23],
+        [24, 25, 26, 27, 28, 29, 30, 31],
+        [1, 2, 11, 20, 29, 38, 47, 55],
+        [3, 9, 12, 21, 30, 39, 54],
     ]
 
     def __init__(self):
@@ -585,7 +589,7 @@ class NTupleNetwork:
         ]
 
     def evaluate(self, board: Board, is_black: bool) -> float:
-        """盤面評価（8対称変換を適用して全タプルの重みを合算）"""
+        """盤面評価（回転4対称変換を適用して全タプルの重みを合算）"""
         score = 0.0
         board_array = board.to_array(is_black)
         for sym in self._symmetries(board_array):
@@ -610,7 +614,7 @@ class NTupleNetwork:
         return index
 
     def _symmetries(self, board_array: np.ndarray) -> list[np.ndarray]:
-        """8対称変換を返す（Rust側と同一の変換）"""
+        """回転4対称変換を返す（Rust側と同一の変換）"""
 ```
 
 ### 3.4 td_lambda.py: TD-Lambda学習
@@ -1064,7 +1068,7 @@ Reversi/
 │       ├── types.rs             # Position, GameState, GameResult
 │       └── ai/
 │           ├── mod.rs           # AI公開インターフェース
-│           ├── ntuple.rs        # NTupleEvaluator, 8対称変換, weights.binデシリアライズ
+│           ├── ntuple.rs        # NTupleEvaluator, 回転4対称変換, weights.binデシリアライズ
 │           ├── search.rs        # Searcher, 反復深化, NegaAlpha, 完全読み
 │           └── weights.bin      # 学習済みモデル（include_bytes!対象）
 ├── python/
