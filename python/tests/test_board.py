@@ -21,6 +21,12 @@ def test_initial_white_legal_moves_are_four_expected_squares() -> None:
     assert board.legal_moves(False) == expected
 
 
+def test_initial_counts_and_empty() -> None:
+    board = Board()
+    assert board.count() == (2, 2)
+    assert board.empty_count() == 60
+
+
 def test_place_flips_and_updates_counts_and_empty() -> None:
     board = Board()
     flips = board.place(idx(2, 3), True)
