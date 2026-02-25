@@ -7,3 +7,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^rust/.*\.rs$
+      - id: python-ruff-format
+        name: ruff format (python)
+        entry: python -m ruff format python
+        language: system
+        pass_filenames: false
+        files: ^python/.*\.py$
+      - id: python-ruff-check
+        name: ruff check (python)
+        entry: python -m ruff check python
+        language: system
+        pass_filenames: false
+        files: ^python/.*\.py$
