@@ -64,10 +64,10 @@
 
 ### 2-4. `td_lambda.py` — TD-Lambda 学習
 
-- [ ] `TDLambdaTrainer`（α, λ, ε パラメータ）
-- [ ] ε-greedy 自己対戦ループ `_play_one_game()`
-- [ ] TD-Lambda 遡及更新 `_update_weights()`
-- [ ] pytest 単体テスト: 更新方向の正当性、終局報酬反映、固定seed再現性
+- [x] `TDLambdaTrainer`（α, λ, ε パラメータ）
+- [x] ε-greedy 自己対戦ループ `_play_one_game()`
+- [x] TD-Lambda 遡及更新 `_update_weights()`
+- [x] pytest 単体テスト: 更新方向の正当性、終局報酬反映、固定seed再現性
 
 ### 2-5. `export_model.py` — モデルエクスポート
 
