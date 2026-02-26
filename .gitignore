@@ -4,4 +4,6 @@ rust/pkg/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest_tmp/
 pytest-cache-files-*/
+/tmp*/
