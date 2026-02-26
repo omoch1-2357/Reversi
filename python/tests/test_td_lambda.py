@@ -67,8 +67,9 @@ def test_update_weights_uses_lambda_return_across_multiple_steps() -> None:
     assert ntuple.updates[0][0] is False
     assert ntuple.updates[0][1] == pytest.approx(-1.0)
     assert ntuple.updates[1][0] is True
-    assert ntuple.updates[1][1] == pytest.approx(-0.5)
-    assert abs(ntuple.updates[0][1]) > abs(ntuple.updates[1][1])
+    assert ntuple.updates[1][1] == pytest.approx(0.5)
+    assert ntuple.updates[0][1] < 0.0
+    assert ntuple.updates[1][1] > 0.0
 
 
 def test_play_one_game_is_reproducible_with_fixed_seed() -> None:

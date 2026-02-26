@@ -101,14 +101,21 @@ class TDLambdaTrainer:
         # Align terminal reward with the side to move in the last recorded state.
         next_value = reward if history[-1][1] else -reward
         cumulative_td = 0.0
+        next_player: bool | None = None
 
         for board, is_black in reversed(history):
             current_value = self.ntuple.evaluate(board, is_black)
             td_error = next_value - current_value
-            cumulative_td = td_error + self.lambda_ * cumulative_td
+            if next_player is None:
+                cumulative_td = td_error
+            else:
+                same_player = is_black == next_player
+                signed_lambda = self.lambda_ if same_player else -self.lambda_
+                cumulative_td = td_error + signed_lambda * cumulative_td
             delta = self.alpha * cumulative_td
             self.ntuple.update(board, is_black, delta)
             next_value = -current_value
+            next_player = is_black
 
     @staticmethod
     def _legal_moves_from_mask(mask: int) -> list[int]:
