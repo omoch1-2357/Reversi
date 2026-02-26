@@ -108,7 +108,7 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
             raise ValueError(f"weights truncated at tuple index {idx}")
 
         for weight_offset in range(offset, end, 4):
-            struct.unpack_from("<f", data, weight_offset)
+            _ = struct.unpack_from("<f", data, weight_offset)
         offset = end
 
     if offset != len(data):

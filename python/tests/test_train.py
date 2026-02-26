@@ -50,7 +50,7 @@ def test_main_runs_pipeline_and_outputs_valid_model(tmp_path) -> None:
     )
     assert magic == MAGIC
     assert version == VERSION
-    assert num_tuples == len(NTupleNetwork().TUPLE_PATTERNS)
+    assert num_tuples == len(NTupleNetwork.TUPLE_PATTERNS)
     assert reserved == 0
     assert (zlib.crc32(payload[HEADER_SIZE:]) & 0xFFFFFFFF) == crc32
 
@@ -59,11 +59,12 @@ def test_verify_exported_model_detects_crc_mismatch(tmp_path) -> None:
     run_dir = tmp_path / "crc-mismatch"
     run_dir.mkdir()
     output = run_dir / "weights.bin"
-    main(["--games", "0", "--output", str(output), "--seed", "42"])
+    result = main(["--games", "0", "--output", str(output), "--seed", "42"])
+    assert result == 0
 
     payload = bytearray(output.read_bytes())
     payload[-1] ^= 0x01
     output.write_bytes(payload)
 
     with pytest.raises(ValueError, match="CRC32 mismatch"):
-        verify_exported_model(output, NTupleNetwork().TUPLE_PATTERNS)
+        verify_exported_model(output, NTupleNetwork.TUPLE_PATTERNS)
