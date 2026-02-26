@@ -71,9 +71,9 @@
 
 ### 2-5. `export_model.py` — モデルエクスポート
 
-- [ ] `weights.bin` フォーマット（20bytes ヘッダ + タプル定義 + 重み配列）
-- [ ] CRC32 チェックサム計算＋ヘッダ付与
-- [ ] pytest 単体テスト: magic/version/num_tuples/CRC32/データ長整合の検証
+- [x] `weights.bin` フォーマット（20bytes ヘッダ + タプル定義 + 重み配列）
+- [x] CRC32 チェックサム計算＋ヘッダ付与
+- [x] pytest 単体テスト: magic/version/num_tuples/CRC32/データ長整合の検証
 
 ### 2-6. `train.py` — メインスクリプト
 
