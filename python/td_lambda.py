@@ -100,13 +100,13 @@ class TDLambdaTrainer:
 
         # Align terminal reward with the side to move in the last recorded state.
         next_value = reward if history[-1][1] else -reward
-        eligibility = 0.0
+        cumulative_td = 0.0
 
         for board, is_black in reversed(history):
             current_value = self.ntuple.evaluate(board, is_black)
             td_error = next_value - current_value
-            eligibility = self.lambda_ * eligibility + 1.0
-            delta = self.alpha * td_error * eligibility
+            cumulative_td = td_error + self.lambda_ * cumulative_td
+            delta = self.alpha * cumulative_td
             self.ntuple.update(board, is_black, delta)
             next_value = -current_value
 

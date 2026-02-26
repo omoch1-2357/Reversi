@@ -54,6 +54,23 @@ def test_terminal_reward_is_reflected_per_player_perspective(
     assert delta == pytest.approx(expected_delta)
 
 
+def test_update_weights_uses_lambda_return_across_multiple_steps() -> None:
+    ntuple = RecordingNTuple(value=0.0)
+    trainer = TDLambdaTrainer(ntuple, alpha=1.0, lambda_=0.5, epsilon=0.0, seed=13)
+    history = [(Board(), True), (Board(), False)]
+    final_board = Board(black=(1 << 64) - 1, white=0)
+
+    trainer._update_weights(history, final_board)
+
+    assert len(ntuple.updates) == 2
+    # Reverse traversal: last state (white-to-move), then first state (black-to-move).
+    assert ntuple.updates[0][0] is False
+    assert ntuple.updates[0][1] == pytest.approx(-1.0)
+    assert ntuple.updates[1][0] is True
+    assert ntuple.updates[1][1] == pytest.approx(-0.5)
+    assert abs(ntuple.updates[0][1]) > abs(ntuple.updates[1][1])
+
+
 def test_play_one_game_is_reproducible_with_fixed_seed() -> None:
     ntuple_a = NTupleNetwork()
     ntuple_b = NTupleNetwork()
