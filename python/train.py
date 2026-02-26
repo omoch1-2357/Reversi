@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import struct
+import sys
 from typing import Sequence
 import zlib
 
@@ -147,23 +148,27 @@ def train_and_export(
 
 def main(argv: list[str] | None = None) -> int:
     """Execute CLI workflow for training and exporting weights.bin."""
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
 
-    print(
-        "Training with "
-        f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
-        f"epsilon={args.epsilon}, seed={args.seed}"
-    )
-    output_path = train_and_export(
-        games=args.games,
-        alpha=args.alpha,
-        lambda_=args.lambda_,
-        epsilon=args.epsilon,
-        output=args.output,
-        seed=args.seed,
-    )
-    print(f"Model exported and verified: {output_path}")
-    return 0
+        print(
+            "Training with "
+            f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
+            f"epsilon={args.epsilon}, seed={args.seed}"
+        )
+        output_path = train_and_export(
+            games=args.games,
+            alpha=args.alpha,
+            lambda_=args.lambda_,
+            epsilon=args.epsilon,
+            output=args.output,
+            seed=args.seed,
+        )
+        print(f"Model exported and verified: {output_path}")
+        return 0
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
