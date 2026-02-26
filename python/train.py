@@ -129,7 +129,7 @@ def train_and_export(
     if games < 0:
         raise ValueError(f"games must be >= 0, got {games}")
 
-    output_path = Path(output)
+    output_path = output
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     ntuple = NTupleNetwork()
