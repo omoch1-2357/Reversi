@@ -19,9 +19,15 @@ def _build_data_section(ntuple: NTupleNetwork) -> bytes:
 
     data = bytearray()
 
-    for pattern in ntuple.TUPLE_PATTERNS:
+    for pattern_idx, pattern in enumerate(ntuple.TUPLE_PATTERNS):
         if len(pattern) > 255:
             raise ValueError("tuple_size must fit in u8")
+        for pos_idx, pos in enumerate(pattern):
+            if pos < 0 or pos > 63:
+                raise ValueError(
+                    f"pattern[{pattern_idx}] has invalid board index "
+                    f"{pos} at position {pos_idx}: {pattern}"
+                )
         data.append(len(pattern))
         data.extend(bytes(pattern))
 
@@ -43,12 +49,20 @@ def export_model(ntuple: NTupleNetwork, path: str | Path) -> None:
     data = _build_data_section(ntuple)
     data_crc32 = zlib.crc32(data) & 0xFFFFFFFF
 
+    header_format = "<4sIIII"
+    packed_header = struct.pack(
+        header_format,
+        MAGIC,
+        VERSION,
+        len(ntuple.TUPLE_PATTERNS),
+        data_crc32,
+        0,
+    )
+    if len(packed_header) != struct.calcsize(header_format):
+        raise ValueError("packed header size mismatch")
+
     header = bytearray()
-    header.extend(MAGIC)
-    header.extend(struct.pack("<I", VERSION))
-    header.extend(struct.pack("<I", len(ntuple.TUPLE_PATTERNS)))
-    header.extend(struct.pack("<I", data_crc32))
-    header.extend(struct.pack("<I", 0))
+    header.extend(packed_header)
 
     output = Path(path)
     output.write_bytes(bytes(header) + data)

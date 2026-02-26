@@ -43,10 +43,33 @@ def test_export_model_writes_crc32_for_data_section() -> None:
 
 def test_export_model_binary_length_matches_tuple_and_weight_layout() -> None:
     ntuple = NTupleNetwork()
+    for pattern_idx, weights in enumerate(ntuple.weights):
+        weights[0] = pattern_idx + 0.125
+        weights[-1] = -(pattern_idx + 0.5)
+
     payload = _exported_payload(ntuple)
 
-    tuple_definitions_len = sum(1 + len(pattern) for pattern in ntuple.TUPLE_PATTERNS)
-    weights_len = sum((3 ** len(pattern)) * 4 for pattern in ntuple.TUPLE_PATTERNS)
-    expected_len = HEADER_SIZE + tuple_definitions_len + weights_len
+    offset = HEADER_SIZE
+    for pattern in ntuple.TUPLE_PATTERNS:
+        tuple_size = payload[offset]
+        assert tuple_size == len(pattern)
+        offset += 1
 
-    assert len(payload) == expected_len
+        positions = list(payload[offset : offset + tuple_size])
+        assert positions == pattern
+        offset += tuple_size
+
+    for pattern_idx, pattern in enumerate(ntuple.TUPLE_PATTERNS):
+        weights = ntuple.weights[pattern_idx]
+        expected_len = 3 ** len(pattern)
+        assert len(weights) == expected_len
+
+        for weight_idx in range(expected_len):
+            raw = payload[offset : offset + 4]
+            value = struct.unpack("<f", raw)[0]
+            expected_value = float(weights[weight_idx])
+            assert value == expected_value
+            assert raw == struct.pack("<f", expected_value)
+            offset += 4
+
+    assert offset == len(payload)
