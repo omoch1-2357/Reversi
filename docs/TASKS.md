@@ -77,9 +77,9 @@
 
 ### 2-6. `train.py` — メインスクリプト
 
-- [ ] argparse CLI（`--games`, `--alpha`, `--lambda`, `--epsilon`, `--output`）
-- [ ] パイプライン統合（学習→エクスポート）
-- [ ] 動作確認（固定seed・1000局学習で `weights.bin` 生成成功、フォーマット・CRC・ロード可能性を検証）
+- [x] argparse CLI（`--games`, `--alpha`, `--lambda`, `--epsilon`, `--output`）
+- [x] パイプライン統合（学習→エクスポート）
+- [x] 動作確認（固定seed・1000局学習で `weights.bin` 生成成功、フォーマット・CRC・ロード可能性を検証）
 
 ---
 
