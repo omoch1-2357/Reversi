@@ -87,11 +87,11 @@
 
 ### 3-1. `ai/ntuple.rs` — N-Tuple 評価関数（推論用）
 
-- [ ] 仮 `weights.bin` を Python で生成し `rust/src/ai/` に配置
-- [ ] `NTupleEvaluator` 構造体
-- [ ] `from_bytes()` — デシリアライズ（マジック・バージョン・CRC32 検証）
-- [ ] `evaluate(board, is_black)` — 手番視点、回転4対称変換（反転相当はタプル定義で吸収）
-- [ ] 単体テスト: デシリアライズ成功/失敗、評価値計算、T-09（不正 weights.bin）
+- [x] 仮 `weights.bin` を Python で生成し `rust/src/ai/` に配置
+- [x] `NTupleEvaluator` 構造体
+- [x] `from_bytes()` — デシリアライズ（マジック・バージョン・CRC32 検証）
+- [x] `evaluate(board, is_black)` — 手番視点、回転4対称変換（反転相当はタプル定義で吸収）
+- [x] 単体テスト: デシリアライズ成功/失敗、評価値計算、T-09（不正 weights.bin）
 
 ### 3-2. `ai/search.rs` — 探索アルゴリズム
 
