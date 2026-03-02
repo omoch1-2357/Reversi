@@ -156,3 +156,125 @@ fn to_js_value<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(value)
         .map_err(|e| JsValue::from_str(&format!("serialization error: {e}")))
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::*;
+    use crate::types::GameState;
+
+    const MAX_GAME_STEPS: usize = 200;
+    const AI_MOVE_LIMIT_MS: f64 = 3_000.0;
+
+    #[wasm_bindgen_test]
+    fn api_flow_init_place_ai_get_result_works_end_to_end() {
+        init_game(1).expect("init_game must succeed");
+        assert!(
+            get_legal_moves().is_ok(),
+            "get_legal_moves must succeed right after init"
+        );
+        assert!(
+            get_result().is_err(),
+            "get_result must fail before game over"
+        );
+
+        let opening = first_internal_legal_move().expect("player should have an opening move");
+        place_stone(opening.row, opening.col).expect("place_stone must succeed on legal move");
+
+        loop_until_game_over();
+
+        assert!(
+            get_result().is_ok(),
+            "get_result must succeed after game over"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn ai_move_is_deterministic_for_same_level_and_position() {
+        let first = play_one_opening_and_ai_step(3);
+        let second = play_one_opening_and_ai_step(3);
+
+        assert_eq!(
+            first, second,
+            "same level and position must yield same AI step"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn ai_move_smoke_meets_level_performance_target() {
+        for level in MIN_LEVEL..=MAX_LEVEL {
+            init_game(level).expect("init_game must succeed");
+            let opening = first_internal_legal_move().expect("opening move must exist");
+            place_stone(opening.row, opening.col).expect("place_stone must succeed");
+
+            let start_ms = js_sys::Date::now();
+            ai_move().expect("ai_move must succeed");
+            let elapsed_ms = js_sys::Date::now() - start_ms;
+            assert!(
+                elapsed_ms < AI_MOVE_LIMIT_MS,
+                "ai_move exceeded 3s target at level {level}: {elapsed_ms} ms"
+            );
+        }
+    }
+
+    fn play_one_opening_and_ai_step(level: u8) -> GameState {
+        init_game(level).expect("init_game must succeed");
+        let opening = first_internal_legal_move().expect("opening move must exist");
+        place_stone(opening.row, opening.col).expect("place_stone must succeed");
+        ai_move().expect("ai_move must succeed");
+        snapshot_state()
+    }
+
+    fn loop_until_game_over() {
+        for _ in 0..MAX_GAME_STEPS {
+            let (is_game_over, current_player) = current_state_markers();
+            if is_game_over {
+                return;
+            }
+
+            assert!(
+                get_legal_moves().is_ok(),
+                "get_legal_moves must succeed while game is active"
+            );
+
+            if current_player == PLAYER_BLACK {
+                let mv = first_internal_legal_move().expect(
+                    "player turn must have legal move (auto-pass is AI side responsibility)",
+                );
+                place_stone(mv.row, mv.col).expect("player legal move must succeed");
+            } else {
+                let start_ms = js_sys::Date::now();
+                ai_move().expect("ai_move must succeed on AI turn");
+                let elapsed_ms = js_sys::Date::now() - start_ms;
+                assert!(
+                    elapsed_ms < AI_MOVE_LIMIT_MS,
+                    "ai_move exceeded 3s target during flow: {elapsed_ms} ms"
+                );
+            }
+        }
+
+        panic!("game did not finish within {MAX_GAME_STEPS} steps");
+    }
+
+    fn first_internal_legal_move() -> Option<crate::types::Position> {
+        let guard = GAME.lock().expect("game lock must not be poisoned");
+        guard.as_ref()?.get_legal_moves().into_iter().next()
+    }
+
+    fn current_state_markers() -> (bool, u8) {
+        let guard = GAME.lock().expect("game lock must not be poisoned");
+        let game = guard
+            .as_ref()
+            .expect("game must be initialized before checking state");
+        (game.is_game_over, game.current_player)
+    }
+
+    fn snapshot_state() -> GameState {
+        let guard = GAME.lock().expect("game lock must not be poisoned");
+        guard
+            .as_ref()
+            .expect("game must be initialized before snapshot")
+            .to_game_state()
+    }
+}
