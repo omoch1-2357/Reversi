@@ -6,7 +6,6 @@ use crate::board::Board;
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const MIN_SCORE: f32 = f32::NEG_INFINITY;
 const MAX_SCORE: f32 = f32::INFINITY;
-const SCORE_EPSILON: f32 = 1e-6;
 #[cfg(test)]
 const BOARD_CELLS: usize = 64;
 
@@ -107,7 +106,7 @@ impl<'a> Searcher<'a> {
         beta: f32,
     ) -> SearchResult {
         // Keep depth-1 search guaranteed by suppressing timeout checks at root depth 1.
-        if root_depth > 1 && self.start_time.elapsed() > self.timeout {
+        if root_depth > 1 && self.start_time.elapsed() >= self.timeout {
             self.timed_out = true;
             return SearchResult::TimedOut;
         }
@@ -183,7 +182,7 @@ impl<'a> Searcher<'a> {
         alpha: f32,
         beta: f32,
     ) -> SearchResult {
-        if self.start_time.elapsed() > self.timeout {
+        if self.start_time.elapsed() >= self.timeout {
             self.timed_out = true;
             return SearchResult::TimedOut;
         }
@@ -236,14 +235,7 @@ impl<'a> Searcher<'a> {
 }
 
 fn is_better_move(score: f32, mv: usize, best_score: f32, best_move: usize) -> bool {
-    let diff = score - best_score;
-    if diff > SCORE_EPSILON {
-        return true;
-    }
-    if diff.abs() <= SCORE_EPSILON {
-        return mv < best_move;
-    }
-    false
+    score > best_score || (score == best_score && mv < best_move)
 }
 
 fn exact_score(board: &Board, is_black: bool) -> f32 {
