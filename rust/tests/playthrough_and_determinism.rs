@@ -115,11 +115,14 @@ fn search_is_deterministic_with_embedded_model() {
     let evaluator = NTupleEvaluator::from_bytes(MODEL_BYTES)
         .expect("embedded model bytes must deserialize for integration tests");
     let board = Board::new();
+    let legal = board.legal_moves(true);
 
     let mut expected = None;
     for _ in 0..16 {
         let mut searcher = Searcher::new(&evaluator, 4);
         let mv = searcher.search(&board, true);
+        assert_ne!(legal & (1u64 << mv), 0, "search must return a legal move");
+        assert!(!searcher.timed_out(), "determinism test must not timeout");
         if let Some(first) = expected {
             assert_eq!(mv, first, "search must be deterministic");
         } else {

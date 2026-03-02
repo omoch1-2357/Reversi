@@ -366,11 +366,14 @@ mod tests {
     fn search_is_deterministic_for_same_position_and_level() {
         let evaluator = build_constant_evaluator();
         let board = Board::new();
+        let legal = board.legal_moves(true);
 
         let mut expected = None;
         for _ in 0..16 {
             let mut searcher = Searcher::new(&evaluator, 4);
             let mv = searcher.search(&board, true);
+            assert_ne!(legal & (1u64 << mv), 0, "search must return a legal move");
+            assert!(!searcher.timed_out(), "determinism test must not timeout");
             if let Some(first) = expected {
                 assert_eq!(mv, first, "search must return the same move every run");
             } else {
