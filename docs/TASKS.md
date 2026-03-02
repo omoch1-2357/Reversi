@@ -115,8 +115,8 @@
 
 ### 3-4. Rust 統合テスト
 
-- [ ] `tests/` にプレイスルーテスト（init → place → ai_move → get_result）
-- [ ] `search.rs` 単体/結合での決定性検証（Rust内部層。WASM境界の決定性は 3-5 の T-08/T-13 で担保）
+- [x] `tests/` にプレイスルーテスト（init → place → ai_move → get_result）
+- [x] `search.rs` 単体/結合での決定性検証（Rust内部層。WASM境界の決定性は 3-5 の T-08/T-13 で担保）
 
 ### 3-5. WASM API 統合テスト実装
 
