@@ -3,8 +3,8 @@ use crate::types::{GameResult, GameState, Position};
 
 const BOARD_WIDTH: usize = 8;
 const BOARD_LEN: usize = BOARD_WIDTH * BOARD_WIDTH;
-const PLAYER_BLACK: u8 = 1;
-const PLAYER_WHITE: u8 = 2;
+pub const PLAYER_BLACK: u8 = 1;
+pub const PLAYER_WHITE: u8 = 2;
 
 pub trait MoveSelector: Send + Sync {
     fn select_move(&self, board: &Board, is_black: bool, level: u8) -> Option<usize>;
