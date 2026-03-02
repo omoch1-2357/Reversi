@@ -173,6 +173,14 @@ mod tests {
     const AI_MOVE_LIMIT_MS: f64 = 3_000.0;
     const ERROR_GAME_NOT_INITIALIZED: &str = "game is not initialized";
     const ERROR_PLAYER_TURN: &str = "it is not the player's turn";
+    const ERROR_INVALID_LEVEL: &str = "level must be in 1..=6";
+
+    const T11_BLACK: u64 = 0xffc3_e7b9_98c8_80bf;
+    const T11_WHITE: u64 = 0x003c_1846_6736_7f40;
+
+    const T12_BLACK: u64 = 0x7a0e_123f_4981_0101;
+    const T12_WHITE: u64 = 0x01f1_6d40_161e_0e1e;
+    const T12_WHITE_LEGAL_MASK: u64 = 0x0400_0000_2040_0000;
 
     #[wasm_bindgen_test]
     fn api_flow_init_place_ai_get_result_works_end_to_end() {
@@ -195,6 +203,18 @@ mod tests {
             get_result().is_ok(),
             "get_result must succeed after game over"
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn init_game_rejects_out_of_range_levels() {
+        expect_err_message(init_game(0), ERROR_INVALID_LEVEL);
+        expect_err_message(init_game(7), ERROR_INVALID_LEVEL);
+    }
+
+    #[wasm_bindgen_test]
+    fn get_result_returns_error_while_game_is_active() {
+        init_game(1).expect("init_game must succeed");
+        expect_err_message(get_result(), "game is not over");
     }
 
     #[wasm_bindgen_test]
@@ -221,6 +241,73 @@ mod tests {
             assert!(
                 elapsed_ms < AI_MOVE_LIMIT_MS,
                 "ai_move exceeded 3s target at level {level}: {elapsed_ms} ms"
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn init_game_reinitializes_global_state() {
+        init_game(1).expect("first init_game must succeed");
+        let opening = first_internal_legal_move().expect("opening move must exist");
+        place_stone(opening.row, opening.col).expect("player move must succeed");
+        assert_ne!(
+            snapshot_state().black_count,
+            2,
+            "state should change before reset"
+        );
+
+        init_game(6).expect("second init_game must succeed");
+        let reset = snapshot_state();
+        assert_eq!(reset.current_player, PLAYER_BLACK);
+        assert_eq!(reset.black_count, 2);
+        assert_eq!(reset.white_count, 2);
+        assert!(!reset.is_game_over);
+        assert!(!reset.is_pass);
+        assert!(reset.flipped.is_empty());
+    }
+
+    #[wasm_bindgen_test]
+    fn ai_move_passes_when_ai_has_no_legal_moves() {
+        inject_test_position(3, T11_BLACK, T11_WHITE, PLAYER_WHITE);
+        let before = snapshot_state().board;
+
+        ai_move().expect("ai_move should handle pass position");
+        let after = snapshot_state();
+
+        assert_eq!(after.board, before, "board must stay unchanged on pass");
+        assert_eq!(after.current_player, PLAYER_BLACK);
+        assert!(after.is_pass);
+        assert!(!after.is_game_over);
+        assert!(after.flipped.is_empty());
+    }
+
+    #[wasm_bindgen_test]
+    fn exact_solve_timeout_returns_fallback_move() {
+        let _guard = ForcedExactSolveTimeoutGuard::new();
+        inject_test_position(6, T12_BLACK, T12_WHITE, PLAYER_WHITE);
+        let before = snapshot_state().board;
+
+        ai_move().expect("ai_move should return fallback move after timeout");
+        let after = snapshot_state();
+
+        let placed =
+            placed_white_index(&before, &after.board).expect("one white stone must be placed");
+        assert_ne!(
+            T12_WHITE_LEGAL_MASK & (1u64 << placed),
+            0,
+            "fallback move must still be legal"
+        );
+        assert!(after.white_count > 0);
+    }
+
+    #[wasm_bindgen_test]
+    fn ai_move_is_deterministic_for_100_repeated_runs() {
+        let expected = ai_move_index_after_opening(4);
+        for _ in 0..99 {
+            let mv = ai_move_index_after_opening(4);
+            assert_eq!(
+                mv, expected,
+                "AI move must stay deterministic across 100 runs"
             );
         }
     }
@@ -261,6 +348,40 @@ mod tests {
         place_stone(opening.row, opening.col).expect("place_stone must succeed");
         ai_move().expect("ai_move must succeed");
         snapshot_state()
+    }
+
+    fn ai_move_index_after_opening(level: u8) -> usize {
+        init_game(level).expect("init_game must succeed");
+        let opening = first_internal_legal_move().expect("opening move must exist");
+        place_stone(opening.row, opening.col).expect("place_stone must succeed");
+        let before = snapshot_state().board;
+        ai_move().expect("ai_move must succeed");
+        let after = snapshot_state().board;
+        placed_white_index(&before, &after).expect("exactly one white stone should be newly placed")
+    }
+
+    fn inject_test_position(level: u8, black: u64, white: u64, current_player: u8) {
+        let evaluator = NTupleEvaluator::from_bytes(MODEL_BYTES)
+            .expect("embedded model bytes must deserialize for wasm tests");
+        let mut game = GameInstance::new(level, Box::new(SearchMoveSelector::new(evaluator)));
+        game.set_board_for_test(Board::from_bitboards(black, white), current_player);
+        let mut guard = GAME.lock().expect("game lock must not be poisoned");
+        *guard = Some(game);
+    }
+
+    struct ForcedExactSolveTimeoutGuard;
+
+    impl ForcedExactSolveTimeoutGuard {
+        fn new() -> Self {
+            crate::ai::search::set_force_exact_solve_timeout_for_test(true);
+            Self
+        }
+    }
+
+    impl Drop for ForcedExactSolveTimeoutGuard {
+        fn drop(&mut self) {
+            crate::ai::search::set_force_exact_solve_timeout_for_test(false);
+        }
     }
 
     fn loop_until_game_over() {

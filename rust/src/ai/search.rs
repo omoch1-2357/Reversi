@@ -2,12 +2,16 @@ use web_time::{Duration, Instant};
 
 use crate::ai::ntuple::NTupleEvaluator;
 use crate::board::Board;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const MIN_SCORE: f32 = f32::NEG_INFINITY;
 const MAX_SCORE: f32 = f32::INFINITY;
 #[cfg(test)]
 const BOARD_CELLS: usize = 64;
+#[cfg(test)]
+static FORCE_EXACT_SOLVE_TIMEOUT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SearchResult {
@@ -182,6 +186,12 @@ impl<'a> Searcher<'a> {
         alpha: f32,
         beta: f32,
     ) -> SearchResult {
+        #[cfg(test)]
+        if FORCE_EXACT_SOLVE_TIMEOUT.load(Ordering::Relaxed) {
+            self.timed_out = true;
+            return SearchResult::TimedOut;
+        }
+
         if self.start_time.elapsed() >= self.timeout {
             self.timed_out = true;
             return SearchResult::TimedOut;
@@ -232,6 +242,12 @@ impl<'a> Searcher<'a> {
 
         SearchResult::Complete(best_move, best_score)
     }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn set_force_exact_solve_timeout_for_test(force: bool) {
+    FORCE_EXACT_SOLVE_TIMEOUT.store(force, Ordering::Relaxed);
 }
 
 fn is_better_move(score: f32, mv: usize, best_score: f32, best_move: usize) -> bool {
