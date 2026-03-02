@@ -95,13 +95,13 @@
 
 ### 3-2. `ai/search.rs` — 探索アルゴリズム
 
-- [ ] `Searcher` 構造体（タイムアウト・開始時刻管理）
-- [ ] 反復深化フロー `search()` — 合法手1つなら即返し
-- [ ] `negaalpha()` — `root_depth` 引数付き（深度1タイムアウト抑制）
-- [ ] 合法手の評価値順ソート＋安定タイブレーク（インデックス昇順）— 枝刈り効率向上（DESIGN.md §2.5, REQUIREMENTS.md §5.3）
-- [ ] タイブレーク: `score > best_score || (score == best_score && mv < best_move)`
-- [ ] 終盤完全読み `should_exact_solve()` / `exact_solve()` — deadline 管理付き
-- [ ] 単体テスト: 探索結果の正当性、タイムアウト動作
+- [x] `Searcher` 構造体（タイムアウト・開始時刻管理）
+- [x] 反復深化フロー `search()` — 合法手1つなら即返し
+- [x] `negaalpha()` — `root_depth` 引数付き（深度1タイムアウト抑制）
+- [x] 合法手の評価値順ソート＋安定タイブレーク（インデックス昇順）— 枝刈り効率向上（DESIGN.md §2.5, REQUIREMENTS.md §5.3）
+- [x] タイブレーク: `score > best_score || (score == best_score && mv < best_move)`
+- [x] 終盤完全読み `should_exact_solve()` / `exact_solve()` — deadline 管理付き
+- [x] 単体テスト: 探索結果の正当性、タイムアウト動作
 
 ### 3-3. `lib.rs` — WASM 公開 API
 
