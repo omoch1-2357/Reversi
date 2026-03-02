@@ -167,7 +167,7 @@ impl GameInstance {
     }
 
     #[cfg(test)]
-    fn set_board_for_test(&mut self, board: Board, current_player: u8) {
+    pub(crate) fn set_board_for_test(&mut self, board: Board, current_player: u8) {
         self.board = board;
         self.current_player = current_player;
         self.is_game_over = false;
