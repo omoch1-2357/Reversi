@@ -105,13 +105,13 @@
 
 ### 3-3. `lib.rs` — WASM 公開 API
 
-- [ ] `GAME` シングルトン（`Lazy<Mutex<Option<GameInstance>>>`）
-- [ ] `init_game(level)` — `include_bytes!`, CRC32検証, `serde_wasm_bindgen::to_value`
-- [ ] `get_legal_moves()` — `Result<JsValue, JsValue>`
-- [ ] `place_stone(row, col)` — 手番検証（`current_player != 1` → Err）
-- [ ] `ai_move()` — 手番検証 + 1手AI着手 + プレイヤー自動パス（F-05）
-- [ ] `get_result()` — 終了検証付き
-- [ ] `wasm-pack build` でビルド通過を確認
+- [x] `GAME` シングルトン（`Lazy<Mutex<Option<GameInstance>>>`）
+- [x] `init_game(level)` — `include_bytes!`, CRC32検証, `serde_wasm_bindgen::to_value`
+- [x] `get_legal_moves()` — `Result<JsValue, JsValue>`
+- [x] `place_stone(row, col)` — 手番検証（`current_player != 1` → Err）
+- [x] `ai_move()` — 手番検証 + 1手AI着手 + プレイヤー自動パス（F-05）
+- [x] `get_result()` — 終了検証付き
+- [x] `wasm-pack build` でビルド通過を確認
 
 ### 3-4. Rust 統合テスト
 
