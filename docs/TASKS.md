@@ -135,9 +135,9 @@
 
 ### 4-1. プロジェクト初期設定
 
-- [ ] `web/` に Vite + React + TypeScript プロジェクトを生成
-- [ ] `vite-plugin-wasm` 導入、`vite.config.ts` 設定（`target: ['chrome80', ...]`, `worker.format: 'es'`, `base: '/Reversi/'`）
-- [ ] WASM生成物を `web/src/wasm` からインポートできることを確認
+- [x] `web/` に Vite + React + TypeScript プロジェクトを生成
+- [x] `vite-plugin-wasm` 導入、`vite.config.ts` 設定（`target: ['chrome80', ...]`, `worker.format: 'es'`, `base: '/Reversi/'`）
+- [x] WASM生成物を `web/src/wasm` からインポートできることを確認
 
 ### 4-2. WASM TypeScript ラッパー
 
