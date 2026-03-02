@@ -6,6 +6,7 @@ use crate::board::Board;
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const MIN_SCORE: f32 = f32::NEG_INFINITY;
 const MAX_SCORE: f32 = f32::INFINITY;
+const SCORE_EPSILON: f32 = 1e-6;
 #[cfg(test)]
 const BOARD_CELLS: usize = 64;
 
@@ -51,15 +52,21 @@ impl<'a> Searcher<'a> {
         }
     }
 
+    /// Searches the best move.
+    /// Caller contract: `board` must have at least one legal move for `is_black`.
     pub fn search(&mut self, board: &Board, is_black: bool) -> usize {
         self.start_time = Instant::now();
         self.timed_out = false;
 
         let legal = board.legal_moves(is_black);
         let moves = bitboard_to_positions(legal);
+        debug_assert!(
+            !moves.is_empty(),
+            "search() requires at least one legal move"
+        );
 
         if moves.is_empty() {
-            return 0;
+            unreachable!("search() called without legal moves");
         }
         if moves.len() == 1 {
             return moves[0];
@@ -154,6 +161,8 @@ impl<'a> Searcher<'a> {
     fn should_exact_solve(&self, board: &Board) -> bool {
         let empty = board.empty_count();
         match self.max_depth {
+            // REQUIREMENTS.md 2.3: Level 1-2 do not use exact solving.
+            1 | 2 => false,
             3 => empty <= 10,
             4 => empty <= 12,
             5 => empty <= 14,
@@ -194,7 +203,7 @@ impl<'a> Searcher<'a> {
                 .negate();
         }
 
-        let moves = bitboard_to_positions(legal);
+        let moves = bitboard_to_sorted_moves(legal, board, is_black, self.evaluator);
         let mut best_move = moves[0];
         let mut best_score = MIN_SCORE;
         let mut alpha = alpha;
@@ -227,7 +236,14 @@ impl<'a> Searcher<'a> {
 }
 
 fn is_better_move(score: f32, mv: usize, best_score: f32, best_move: usize) -> bool {
-    score > best_score || (score == best_score && mv < best_move)
+    let diff = score - best_score;
+    if diff > SCORE_EPSILON {
+        return true;
+    }
+    if diff.abs() <= SCORE_EPSILON {
+        return mv < best_move;
+    }
+    false
 }
 
 fn exact_score(board: &Board, is_black: bool) -> f32 {
