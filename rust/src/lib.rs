@@ -162,10 +162,16 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::*;
-    use crate::types::GameState;
+    use crate::ai::ntuple::NTupleEvaluator;
+    use crate::ai::search::Searcher;
+    use crate::board::Board;
+    use crate::game::{GameInstance, MoveSelector};
+    use crate::types::{GameState, Position};
 
     const MAX_GAME_STEPS: usize = 200;
     const AI_MOVE_LIMIT_MS: f64 = 3_000.0;
+    const ERROR_GAME_NOT_INITIALIZED: &str = "game is not initialized";
+    const ERROR_PLAYER_TURN: &str = "it is not the player's turn";
 
     #[wasm_bindgen_test]
     fn api_flow_init_place_ai_get_result_works_end_to_end() {
@@ -216,6 +222,36 @@ mod tests {
                 "ai_move exceeded 3s target at level {level}: {elapsed_ms} ms"
             );
         }
+    }
+
+    #[wasm_bindgen_test]
+    fn api_returns_uninitialized_error_before_init_game() {
+        clear_game();
+
+        expect_err_message(get_result(), ERROR_GAME_NOT_INITIALIZED);
+        expect_err_message(get_legal_moves(), ERROR_GAME_NOT_INITIALIZED);
+        expect_err_message(place_stone(2, 3), ERROR_GAME_NOT_INITIALIZED);
+        expect_err_message(ai_move(), ERROR_GAME_NOT_INITIALIZED);
+    }
+
+    #[wasm_bindgen_test]
+    fn place_stone_rejects_wrong_player_turn() {
+        init_game(1).expect("init_game must succeed");
+        let opening = first_internal_legal_move().expect("opening move must exist");
+        place_stone(opening.row, opening.col).expect("first player move must succeed");
+
+        expect_err_message(place_stone(opening.row, opening.col), ERROR_PLAYER_TURN);
+    }
+
+    #[wasm_bindgen_test]
+    fn ai_tie_break_prefers_smallest_index_and_is_deterministic() {
+        let first = run_tie_break_step();
+        let second = run_tie_break_step();
+
+        assert_eq!(first.expected_index, second.expected_index);
+        assert_eq!(first.chosen_index, first.expected_index);
+        assert_eq!(second.chosen_index, second.expected_index);
+        assert_eq!(first.chosen_index, second.chosen_index);
     }
 
     fn play_one_opening_and_ai_step(level: u8) -> GameState {
@@ -276,5 +312,118 @@ mod tests {
             .as_ref()
             .expect("game must be initialized before snapshot")
             .to_game_state()
+    }
+
+    fn clear_game() {
+        let mut guard = GAME.lock().expect("game lock must not be poisoned");
+        *guard = None;
+    }
+
+    fn expect_err_message(result: Result<JsValue, JsValue>, expected: &str) {
+        let err = result.expect_err("operation should fail");
+        let message = err
+            .as_string()
+            .expect("error should be representable as string");
+        assert!(
+            message.contains(expected),
+            "expected error to contain '{expected}', got '{message}'"
+        );
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TieBreakResult {
+        chosen_index: usize,
+        expected_index: usize,
+    }
+
+    struct TieBreakSelector {
+        evaluator: NTupleEvaluator,
+    }
+
+    impl MoveSelector for TieBreakSelector {
+        fn select_move(&self, board: &Board, is_black: bool, level: u8) -> Option<usize> {
+            let legal = board.legal_moves(is_black);
+            if legal == 0 {
+                return None;
+            }
+
+            let mut searcher = Searcher::new(&self.evaluator, level);
+            Some(searcher.search(board, is_black))
+        }
+    }
+
+    fn run_tie_break_step() -> TieBreakResult {
+        let mut game = GameInstance::new(
+            1,
+            Box::new(TieBreakSelector {
+                evaluator: build_constant_evaluator(),
+            }),
+        );
+        game.place(2, 3)
+            .expect("fixed opening move should be legal");
+
+        let legal = game.get_legal_moves();
+        assert!(
+            legal.len() > 1,
+            "tie-break scenario requires at least two legal AI moves"
+        );
+        let expected_index = legal
+            .iter()
+            .map(position_to_index)
+            .min()
+            .expect("expected at least one legal move");
+
+        let before = game.to_game_state().board;
+        {
+            let mut guard = GAME.lock().expect("game lock must not be poisoned");
+            *guard = Some(game);
+        }
+
+        ai_move().expect("ai_move must succeed");
+        let after = snapshot_state().board;
+        let chosen_index = placed_white_index(&before, &after)
+            .expect("exactly one newly placed white stone should exist");
+
+        TieBreakResult {
+            chosen_index,
+            expected_index,
+        }
+    }
+
+    fn build_constant_evaluator() -> NTupleEvaluator {
+        let mut payload = Vec::new();
+        payload.push(1u8);
+        payload.push(0u8);
+        for _ in 0..3 {
+            payload.extend_from_slice(&0.0f32.to_le_bytes());
+        }
+
+        let crc = crc32fast::hash(&payload);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"NTRV");
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&crc.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+
+        NTupleEvaluator::from_bytes(&bytes).expect("constant evaluator must deserialize")
+    }
+
+    fn position_to_index(pos: &Position) -> usize {
+        (pos.row as usize) * 8 + pos.col as usize
+    }
+
+    fn placed_white_index(before: &[u8], after: &[u8]) -> Option<usize> {
+        let mut placed = None;
+        for (idx, (&prev, &next)) in before.iter().zip(after.iter()).enumerate() {
+            if prev == 0 && next == PLAYER_WHITE {
+                if placed.is_some() {
+                    return None;
+                }
+                placed = Some(idx);
+            }
+        }
+        placed
     }
 }
