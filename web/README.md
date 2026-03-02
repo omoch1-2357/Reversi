@@ -1,73 +1,62 @@
-# React + TypeScript + Vite
+# Reversi Web Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Project-specific setup
 
-Currently, two official plugins are available:
+### 1. Base path for GitHub Pages
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Set `base: '/Reversi/'` in `vite.config.ts`.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```ts
+export default defineConfig({
+  base: '/Reversi/',
+})
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+This ensures built assets are resolved under the repository subpath.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 2. Build WASM artifacts
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Generate WASM from Rust into `web/src/wasm/pkg` before TypeScript/Vite build.
+
+```bash
+npm --prefix web run build:wasm
 ```
+
+The command runs:
+
+```bash
+wasm-pack build ../rust --target web --out-dir ../web/src/wasm/pkg
+```
+
+Expected generated files:
+
+- `web/src/wasm/pkg/reversi.js`
+- `web/src/wasm/pkg/reversi_bg.wasm`
+- `web/src/wasm/pkg/reversi.d.ts`
+
+### 3. Development and production placement
+
+- Development: app imports from `src/wasm/pkg` via `src/wasm/index.ts`.
+- Production: Vite bundles/copies the wasm binary under `dist/assets/*.wasm`.
+
+Build all artifacts:
+
+```bash
+npm --prefix web run build
+```
+
+Expected output example:
+
+- `web/dist/index.html`
+- `web/dist/assets/reversi_bg-*.wasm`
+
+### 4. Serving and path expectations
+
+Use a static server that serves the built directory as `/Reversi/` on GitHub Pages.
+For local preview:
+
+```bash
+npm --prefix web run preview
+```
+
+If deploying under another subpath, update `vite.config.ts` `base` accordingly.
