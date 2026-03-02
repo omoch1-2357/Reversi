@@ -166,9 +166,7 @@ mod tests {
 
     use super::*;
     use crate::ai::ntuple::NTupleEvaluator;
-    use crate::ai::search::Searcher;
-    use crate::board::Board;
-    use crate::game::{GameInstance, MoveSelector};
+    use crate::game::GameInstance;
     use crate::types::{GameState, Position};
 
     const MAX_GAME_STEPS: usize = 200;
@@ -339,28 +337,10 @@ mod tests {
         expected_index: usize,
     }
 
-    struct TieBreakSelector {
-        evaluator: NTupleEvaluator,
-    }
-
-    impl MoveSelector for TieBreakSelector {
-        fn select_move(&self, board: &Board, is_black: bool, level: u8) -> Option<usize> {
-            let legal = board.legal_moves(is_black);
-            if legal == 0 {
-                return None;
-            }
-
-            let mut searcher = Searcher::new(&self.evaluator, level);
-            Some(searcher.search(board, is_black))
-        }
-    }
-
     fn run_tie_break_step() -> TieBreakResult {
         let mut game = GameInstance::new(
             1,
-            Box::new(TieBreakSelector {
-                evaluator: build_constant_evaluator(),
-            }),
+            Box::new(SearchMoveSelector::new(build_constant_evaluator())),
         );
         game.place(2, 3)
             .expect("fixed opening move should be legal");
