@@ -21,7 +21,7 @@ Run commands from repository root (once each module exists):
 - `npm --prefix web run dev` - start local frontend dev server.
 - `npm --prefix web run build` - create production frontend build.
 - `npx --prefix web playwright test` - run browser integration/E2E checks.
-- `gh issue create --title "..." --milestone "..."` - create and track Issues from `docs/TASKS.md`.
+- `gh issue create --title "..."` - create and track Issues from `docs/TASKS.md`.
 - `gh pr create --fill --body "Closes #<issue>"` - open PRs linked to Issues.
 
 ## Coding Style & Naming Conventions
@@ -45,18 +45,19 @@ Use GitHub Flow as the Git/branch strategy:
 Agent execution rule (mandatory):
 - Do not run write-affecting `git`/`gh` commands without explicit user instruction in the current turn, except for the allowed commands listed below.
 - Explicit instruction is required for: `git add|commit|push|merge|rebase|reset|tag` and `gh pr create|edit|merge`.
+- When passing Git messages via command-line flags, do not use literal `\n`; use an actual multi-line string so line breaks are preserved as real newlines.
+- If a command fails, consider that it may require network access and may have failed due to sandbox restrictions; retry with permission escalation when needed.
 - Read-only commands are allowed without extra confirmation: `git status`, `git diff`, `git log`, `git show`, `git branch -vv`, `gh pr list/view`.
 - In addition to read-only commands, the following are allowed without extra confirmation: `git branch`, `git switch`, `git checkout`, `git cherry-pick`, and `gh issue` commands.
 - `git checkout` and `git cherry-pick` remain disallowed without explicit user instruction when the purpose is file rollback/discarding local changes.
 - A phase/subtask request alone (for example, `$phase-task-git-flow 1.2`) is treated as implementation/validation scope. Run write-affecting Git/GitHub operations only when the user also explicitly requests them, except for the allowed commands above.
 - When write-affecting Git/GitHub steps that still require explicit instruction are pending, show the exact planned commands and wait for user approval.
 
-Issue-based workflow (Milestone-driven):
-1. Create a Milestone for each phase.
-2. Create Issues from `docs/TASKS.md` and assign them to that Milestone.
-3. Start a branch from `main` using the Issue number (for example, `chore/#1-project-setup`).
-4. Open a PR with `Closes #<issue>` and merge after CI passes.
-5. Move to the next Issue.
+Issue-based workflow:
+1. Create Issues from `docs/TASKS.md` and assign them to that Milestone.
+2. Start a branch from `main` using the Issue number (for example, `chore/#1-project-setup`).
+3. Open a PR with `Closes #<issue>` and merge after CI passes.
+4. Move to the next Issue.
 
 There is no established commit history yet. Use Conventional Commits:
 - `feat(rust): add legal move bitboard generation`
