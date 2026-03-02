@@ -114,19 +114,13 @@ pub fn ai_move() -> Result<JsValue, JsValue> {
 
     // Execute exactly one AI step. Worker-side loop handles repeated calls.
     if !game.has_legal_moves_for_current() {
-        game.pass();
-        if !game.has_legal_moves_for_current() {
-            game.end_game();
-        }
+        check_and_handle_pass(game);
     } else {
         game.do_ai_move().map_err(string_to_js)?;
 
         // F-05: auto-pass the player if they have no legal moves.
-        if !game.is_game_over && !game.has_legal_moves_for_current() {
-            game.pass();
-            if !game.has_legal_moves_for_current() {
-                game.end_game();
-            }
+        if !game.is_game_over {
+            check_and_handle_pass(game);
         }
     }
 
@@ -150,6 +144,15 @@ pub fn get_result() -> Result<JsValue, JsValue> {
 
 fn string_to_js(message: String) -> JsValue {
     JsValue::from_str(&message)
+}
+
+fn check_and_handle_pass(game: &mut GameInstance) {
+    if !game.has_legal_moves_for_current() {
+        game.pass();
+        if !game.has_legal_moves_for_current() {
+            game.end_game();
+        }
+    }
 }
 
 fn to_js_value<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
