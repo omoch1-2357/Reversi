@@ -7,6 +7,7 @@ use crate::ai::ntuple::NTupleEvaluator;
 use crate::ai::search::Searcher;
 use crate::board::Board;
 use crate::game::{GameInstance, MoveSelector};
+pub use crate::game::{PLAYER_BLACK, PLAYER_WHITE};
 
 pub mod ai;
 pub mod board;
@@ -15,8 +16,6 @@ pub mod types;
 
 const MIN_LEVEL: u8 = 1;
 const MAX_LEVEL: u8 = 6;
-const PLAYER_BLACK: u8 = 1;
-const PLAYER_WHITE: u8 = 2;
 
 static MODEL_BYTES: &[u8] = include_bytes!("ai/weights.bin");
 static GAME: Lazy<Mutex<Option<GameInstance>>> = Lazy::new(|| Mutex::new(None));
@@ -60,12 +59,9 @@ pub fn init_game(level: u8) -> Result<JsValue, JsValue> {
     let mut guard = GAME
         .lock()
         .map_err(|_| JsValue::from_str("failed to lock game state"))?;
+    let state = instance.to_game_state();
     *guard = Some(instance);
-    let game = guard
-        .as_ref()
-        .ok_or_else(|| JsValue::from_str("failed to initialize game"))?;
-
-    to_js_value(&game.to_game_state())
+    to_js_value(&state)
 }
 
 #[wasm_bindgen]
