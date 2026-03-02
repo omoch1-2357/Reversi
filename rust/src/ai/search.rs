@@ -363,6 +363,23 @@ mod tests {
     }
 
     #[test]
+    fn search_is_deterministic_for_same_position_and_level() {
+        let evaluator = build_constant_evaluator();
+        let board = Board::new();
+
+        let mut expected = None;
+        for _ in 0..16 {
+            let mut searcher = Searcher::new(&evaluator, 4);
+            let mv = searcher.search(&board, true);
+            if let Some(first) = expected {
+                assert_eq!(mv, first, "search must return the same move every run");
+            } else {
+                expected = Some(mv);
+            }
+        }
+    }
+
+    #[test]
     fn search_depth_one_completes_before_timeout_cutoff() {
         let evaluator = build_constant_evaluator();
         let mut searcher = Searcher::with_timeout(&evaluator, 6, Duration::from_nanos(1));
