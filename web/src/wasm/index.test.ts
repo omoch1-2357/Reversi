@@ -37,6 +37,8 @@ const validGameResult = () => ({
 })
 
 const loadWrapper = async () => import('./index')
+const wasmNotReadyMessage =
+  'WASM module is not initialized. Call ensureWasmModuleLoaded() first.'
 
 describe('wasm wrapper', () => {
   beforeEach(() => {
@@ -113,10 +115,16 @@ describe('wasm wrapper', () => {
     const wrapper = await loadWrapper()
     wasmMock.wasm_ready.mockReturnValueOnce(false)
 
-    expect(() => wrapper.initGame(1)).toThrow(
-      'WASM module is not initialized. Call ensureWasmModuleLoaded() first.',
-    )
+    expect(() => wrapper.initGame(1)).toThrow(wasmNotReadyMessage)
     expect(wasmMock.init_game).not.toHaveBeenCalled()
+  })
+
+  it('getLegalMoves throws when wasm module is not initialized', async () => {
+    const wrapper = await loadWrapper()
+    wasmMock.wasm_ready.mockReturnValueOnce(false)
+
+    expect(() => wrapper.getLegalMoves()).toThrow(wasmNotReadyMessage)
+    expect(wasmMock.get_legal_moves).not.toHaveBeenCalled()
   })
 
   it('getLegalMoves returns positions and rejects non-array value', async () => {
@@ -151,6 +159,29 @@ describe('wasm wrapper', () => {
     )
   })
 
+  it('placeStone throws when wasm module is not initialized', async () => {
+    const wrapper = await loadWrapper()
+    wasmMock.wasm_ready.mockReturnValueOnce(false)
+
+    expect(() => wrapper.placeStone(2, 3)).toThrow(wasmNotReadyMessage)
+    expect(wasmMock.place_stone).not.toHaveBeenCalled()
+  })
+
+  it('placeStone rejects out-of-range coordinates', async () => {
+    const wrapper = await loadWrapper()
+
+    expect(() => wrapper.placeStone(-1, 3)).toThrow(
+      'placeStone: row out of bounds (expected integer in range 0..7)',
+    )
+    expect(() => wrapper.placeStone(2, 8)).toThrow(
+      'placeStone: col out of bounds (expected integer in range 0..7)',
+    )
+    expect(() => wrapper.placeStone(2.5, 3)).toThrow(
+      'placeStone: row out of bounds (expected integer in range 0..7)',
+    )
+    expect(wasmMock.place_stone).not.toHaveBeenCalled()
+  })
+
   it('placeStone rejects non-array fields validated by asNumberArray', async () => {
     const wrapper = await loadWrapper()
     wasmMock.place_stone.mockReturnValueOnce({
@@ -159,6 +190,24 @@ describe('wasm wrapper', () => {
     })
 
     expect(() => wrapper.placeStone(2, 3)).toThrow('GameState.flipped must be an array')
+  })
+
+  it('aiMove returns a validated GameState', async () => {
+    const wrapper = await loadWrapper()
+
+    const state = wrapper.aiMove()
+
+    expect(state.board).toHaveLength(64)
+    expect(typeof state.is_game_over).toBe('boolean')
+    expect(wasmMock.ai_move).toHaveBeenCalledTimes(1)
+  })
+
+  it('aiMove throws when wasm module is not initialized', async () => {
+    const wrapper = await loadWrapper()
+    wasmMock.wasm_ready.mockReturnValueOnce(false)
+
+    expect(() => wrapper.aiMove()).toThrow(wasmNotReadyMessage)
+    expect(wasmMock.ai_move).not.toHaveBeenCalled()
   })
 
   it('aiMove rejects invalid boolean field in GameState', async () => {
@@ -193,6 +242,14 @@ describe('wasm wrapper', () => {
       winner: Number.NaN,
     })
     expect(() => wrapper.getResult()).toThrow('GameResult.winner must be a number')
+  })
+
+  it('getResult throws when wasm module is not initialized', async () => {
+    const wrapper = await loadWrapper()
+    wasmMock.wasm_ready.mockReturnValueOnce(false)
+
+    expect(() => wrapper.getResult()).toThrow(wasmNotReadyMessage)
+    expect(wasmMock.get_result).not.toHaveBeenCalled()
   })
 
   it('getResult rejects invalid object shape', async () => {

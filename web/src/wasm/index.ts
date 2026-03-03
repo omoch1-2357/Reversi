@@ -60,6 +60,8 @@ export const getLegalMoves = (): Position[] => {
 }
 
 export const placeStone = (row: number, col: number): GameState => {
+  assertValidBoardCoordinate(row, 'row')
+  assertValidBoardCoordinate(col, 'col')
   assertWasmReady()
   return asGameState(wasmPlaceStone(row, col), 'place_stone')
 }
@@ -156,5 +158,13 @@ const asNumberArray = (value: unknown, label: string): number[] => {
 const assertValidLevel = (level: number): void => {
   if (!Number.isInteger(level) || level < 1 || level > 6) {
     throw new Error('level must be an integer between 1 and 6')
+  }
+}
+
+const assertValidBoardCoordinate = (value: number, name: 'row' | 'col'): void => {
+  if (!Number.isInteger(value) || value < 0 || value > 7) {
+    throw new Error(
+      `placeStone: ${name} out of bounds (expected integer in range 0..7)`,
+    )
   }
 }
