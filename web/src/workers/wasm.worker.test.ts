@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GameResult, GameState, Position } from '../wasm'
 import {
   createWorkerMessageHandler,
+  installWorkerMessageHandler,
   type WorkerRequest,
   type WorkerResponse,
   type WorkerScopeLike,
@@ -183,8 +184,32 @@ describe('wasm worker handler', () => {
 
     await handler({ data: unknown })
 
+    expect(wasmMock.ensureWasmModuleLoaded).not.toHaveBeenCalled()
     expect(posted).toEqual([
       { type: 'error', payload: 'Unknown worker message type: unknown' },
+    ])
+  })
+
+  it('installWorkerMessageHandler wires onmessage to worker message logic', async () => {
+    const { scope, posted } = makeScope()
+    installWorkerMessageHandler(scope)
+    const onmessage = scope.onmessage
+
+    expect(onmessage).not.toBeNull()
+
+    await onmessage?.({ data: { type: 'init_game', payload: { level: 3 } } })
+
+    expect(wasmMock.ensureWasmModuleLoaded).toHaveBeenCalledTimes(1)
+    expect(wasmMock.initGame).toHaveBeenCalledWith(3)
+    expect(wasmMock.getLegalMoves).toHaveBeenCalledTimes(1)
+    expect(posted).toEqual([
+      {
+        type: 'game_state',
+        payload: {
+          state: makeGameState(),
+          moves: [{ row: 2, col: 3 }],
+        },
+      },
     ])
   })
 

@@ -64,19 +64,19 @@ export const createWorkerMessageHandler = (
   }
 
   return async (event: WorkerMessageEvent): Promise<void> => {
+    const request = event.data
+
     try {
-      await dependencies.ensureWasmModuleLoaded()
-
-      const request = event.data
-
       switch (request.type) {
         case 'init_game': {
+          await dependencies.ensureWasmModuleLoaded()
           const state = dependencies.initGame((request as InitGameRequest).payload.level)
           const moves = dependencies.getLegalMoves()
           scope.postMessage({ type: 'game_state', payload: { state, moves } })
           return
         }
         case 'place_stone': {
+          await dependencies.ensureWasmModuleLoaded()
           const payload = (request as PlaceStoneRequest).payload
           let state = dependencies.placeStone(
             payload.row,
@@ -105,12 +105,17 @@ export const createWorkerMessageHandler = (
           return
         }
         case 'get_result': {
+          await dependencies.ensureWasmModuleLoaded()
           const result = dependencies.getResult()
           scope.postMessage({ type: 'result', payload: result })
           return
         }
         default: {
-          throw new Error(`Unknown worker message type: ${request.type}`)
+          scope.postMessage({
+            type: 'error',
+            payload: `Unknown worker message type: ${request.type}`,
+          })
+          return
         }
       }
     } catch (error: unknown) {
