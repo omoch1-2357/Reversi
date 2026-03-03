@@ -63,7 +63,7 @@ jobs:
           cache-dependency-path: "web/package-lock.json"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
@@ -97,7 +97,7 @@ jobs:
           cache-dependency-path: "web/package-lock.json"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
