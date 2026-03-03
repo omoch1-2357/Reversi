@@ -1,8 +1,20 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import initWasmRaw, {
+  ai_move as aiMoveRaw,
+  get_legal_moves as getLegalMovesRaw,
+  get_result as getResultRaw,
+  init_game as initGameRaw,
+  place_stone as placeStoneRaw,
+} from '../wasm/pkg/reversi'
 import type { GameResult, GameState, Position } from '../wasm'
 import {
   createWorkerMessageHandler,
   installWorkerMessageHandler,
+  type WorkerDependencies,
   type WorkerRequest,
   type WorkerResponse,
   type WorkerScopeLike,
@@ -54,6 +66,113 @@ const makeScope = (): { scope: WorkerScopeLike; posted: WorkerResponse[] } => {
     },
     posted,
   }
+}
+
+const wasmPath = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../wasm/pkg/reversi_bg.wasm',
+)
+const wasmBytes = readFileSync(wasmPath)
+let realWasmInitPromise: ReturnType<typeof initWasmRaw> | null = null
+const expectedDeterministicResult: GameResult = {
+  winner: 2,
+  black_count: 19,
+  white_count: 45,
+}
+
+const ensureRealWasmLoaded: WorkerDependencies['ensureWasmModuleLoaded'] = async () => {
+  if (realWasmInitPromise === null) {
+    realWasmInitPromise = initWasmRaw(wasmBytes)
+  }
+  return realWasmInitPromise
+}
+
+const realWasmDependencies: WorkerDependencies = {
+  ensureWasmModuleLoaded: ensureRealWasmLoaded,
+  initGame: (level: number): GameState => initGameRaw(level) as GameState,
+  getLegalMoves: (): Position[] => getLegalMovesRaw() as Position[],
+  placeStone: (row: number, col: number): GameState =>
+    placeStoneRaw(row, col) as GameState,
+  aiMove: (): GameState => aiMoveRaw() as GameState,
+  getResult: (): GameResult => getResultRaw() as GameResult,
+}
+
+const runDeterministicGameWithWorkerHandler = async (
+  level: number,
+): Promise<{
+  aiStepFingerprint: string[]
+  playerTurns: number
+  result: GameResult
+}> => {
+  const { scope, posted } = makeScope()
+  const handler = createWorkerMessageHandler(scope, realWasmDependencies)
+
+  await handler({ data: { type: 'init_game', payload: { level } } })
+  let terminalMessage = posted[posted.length - 1]
+  if (terminalMessage?.type !== 'game_state') {
+    throw new Error('init_game did not produce game_state')
+  }
+
+  const aiStepFingerprint: string[] = []
+  let playerTurns = 0
+  while (terminalMessage.type === 'game_state') {
+    const move = terminalMessage.payload.moves[0]
+    if (!move) {
+      throw new Error('player had no legal moves before game over')
+    }
+
+    playerTurns += 1
+    const cycleStart = posted.length
+    await handler({
+      data: {
+        type: 'place_stone',
+        payload: { row: move.row, col: move.col },
+      },
+    })
+
+    const cycleMessages = posted.slice(cycleStart)
+    for (const message of cycleMessages) {
+      if (message.type === 'error') {
+        throw new Error(message.payload)
+      }
+      if (message.type === 'ai_step') {
+        aiStepFingerprint.push(
+          `${message.payload.state.current_player}:${message.payload.state.black_count}:${message.payload.state.white_count}:${message.payload.state.flipped.join('.')}`,
+        )
+      }
+    }
+
+    const lastCycleMessage = cycleMessages[cycleMessages.length - 1]
+    if (lastCycleMessage === undefined) {
+      throw new Error('place_stone produced no response')
+    }
+
+    if (lastCycleMessage.type === 'game_over') {
+      const resultStart = posted.length
+      await handler({ data: { type: 'get_result' } })
+      const resultMessage = posted[resultStart]
+      if (resultMessage?.type !== 'result') {
+        throw new Error('get_result did not produce result message')
+      }
+
+      return {
+        aiStepFingerprint,
+        playerTurns,
+        result: resultMessage.payload,
+      }
+    }
+
+    if (lastCycleMessage.type !== 'game_state') {
+      throw new Error(`unexpected terminal message: ${lastCycleMessage.type}`)
+    }
+
+    terminalMessage = lastCycleMessage
+    if (playerTurns > 80) {
+      throw new Error('deterministic integration exceeded turn cap')
+    }
+  }
+
+  throw new Error('game loop terminated unexpectedly')
 }
 
 describe('wasm worker handler', () => {
@@ -229,6 +348,28 @@ describe('wasm worker handler', () => {
     expect(posted).toEqual([{ type: 'error', payload: 'Invalid worker message shape' }])
   })
 
+  it('posts error for init_game without payload before initializing wasm', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+
+    await handler({ data: { type: 'init_game' } as unknown as WorkerRequest })
+
+    expect(wasmMock.ensureWasmModuleLoaded).not.toHaveBeenCalled()
+    expect(posted).toEqual([{ type: 'error', payload: 'Invalid worker message shape' }])
+  })
+
+  it('posts error for place_stone with malformed payload before initializing wasm', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+
+    await handler({
+      data: { type: 'place_stone', payload: { x: 1 } } as unknown as WorkerRequest,
+    })
+
+    expect(wasmMock.ensureWasmModuleLoaded).not.toHaveBeenCalled()
+    expect(posted).toEqual([{ type: 'error', payload: 'Invalid worker message shape' }])
+  })
+
   it('installWorkerMessageHandler wires onmessage to worker message logic', async () => {
     const { scope, posted } = makeScope()
     installWorkerMessageHandler(scope)
@@ -263,5 +404,16 @@ describe('wasm worker handler', () => {
 
     expect(wasmMock.getResult).not.toHaveBeenCalled()
     expect(posted).toEqual([{ type: 'error', payload: 'wasm init failed' }])
+  })
+})
+
+describe('wasm worker deterministic integration', () => {
+  it('produces identical ai steps and final result across repeated runs', async () => {
+    const first = await runDeterministicGameWithWorkerHandler(1)
+    const second = await runDeterministicGameWithWorkerHandler(1)
+
+    expect(first).toEqual(second)
+    expect(first.aiStepFingerprint.length).toBeGreaterThan(0)
+    expect(first.result).toEqual(expectedDeterministicResult)
   })
 })

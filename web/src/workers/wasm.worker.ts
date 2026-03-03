@@ -57,6 +57,34 @@ const defaultDependencies: WorkerDependencies = {
 const MAX_AI_STEPS = 64
 const INVALID_MESSAGE_SHAPE = 'Invalid worker message shape'
 
+const isIntegerInRange = (value: unknown, min: number, max: number): boolean =>
+  typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+
+const isValidInitPayload = (payload: unknown): payload is InitGameRequest['payload'] => {
+  if (typeof payload !== 'object' || payload === null || !('level' in payload)) {
+    return false
+  }
+
+  return isIntegerInRange((payload as { level: unknown }).level, 1, 6)
+}
+
+const isValidPlaceStonePayload = (
+  payload: unknown,
+): payload is PlaceStoneRequest['payload'] => {
+  if (
+    typeof payload !== 'object'
+    || payload === null
+    || !('row' in payload)
+    || !('col' in payload)
+  ) {
+    return false
+  }
+
+  const row = (payload as { row: unknown }).row
+  const col = (payload as { col: unknown }).col
+  return isIntegerInRange(row, 0, 7) && isIntegerInRange(col, 0, 7)
+}
+
 export const createWorkerMessageHandler = (
   scope: WorkerScopeLike,
   dependencies: WorkerDependencies = defaultDependencies,
@@ -83,15 +111,26 @@ export const createWorkerMessageHandler = (
     try {
       switch (request.type) {
         case 'init_game': {
+          const payload = (request as { payload?: unknown }).payload
+          if (!isValidInitPayload(payload)) {
+            scope.postMessage({ type: 'error', payload: INVALID_MESSAGE_SHAPE })
+            return
+          }
+
           await dependencies.ensureWasmModuleLoaded()
-          const state = dependencies.initGame((request as InitGameRequest).payload.level)
+          const state = dependencies.initGame(payload.level)
           const moves = dependencies.getLegalMoves()
           scope.postMessage({ type: 'game_state', payload: { state, moves } })
           return
         }
         case 'place_stone': {
+          const payload = (request as { payload?: unknown }).payload
+          if (!isValidPlaceStonePayload(payload)) {
+            scope.postMessage({ type: 'error', payload: INVALID_MESSAGE_SHAPE })
+            return
+          }
+
           await dependencies.ensureWasmModuleLoaded()
-          const payload = (request as PlaceStoneRequest).payload
           let state = dependencies.placeStone(
             payload.row,
             payload.col,
