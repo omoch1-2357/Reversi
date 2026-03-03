@@ -145,8 +145,8 @@
 
 ### 4-3. Web Worker
 
-- [ ] `wasm.worker.ts` — WASM 初期化 + メッセージハンドリング
-- [ ] `place_stone` 後の AI 手番ループ（`while current_player===2`）+ `ai_step` 通知
+- [x] `wasm.worker.ts` — WASM 初期化 + メッセージハンドリング
+- [x] `place_stone` 後の AI 手番ループ（`while current_player===2`）+ `ai_step` 通知
 
 ### 4-4. React コンポーネント
 
