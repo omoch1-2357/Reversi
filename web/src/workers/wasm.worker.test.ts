@@ -83,7 +83,7 @@ type ReversiBindingsModule = {
 }
 
 let realBindingsModule: ReversiBindingsModule | null = null
-const wasmBytes = hasRealWasmBindings ? readFileSync(wasmPath) : new Uint8Array(0)
+let wasmBytes: Uint8Array | null = null
 let realWasmInitPromise: ReturnType<WorkerDependencies['ensureWasmModuleLoaded']> | null = null
 // Deterministic baseline from real WASM integration: level=1, player always picks
 // the first legal move (moves[0]) until game_over, with no RNG involved. These
@@ -116,9 +116,12 @@ const getLoadedBindings = (): ReversiBindingsModule => {
 
 const ensureRealWasmLoaded: WorkerDependencies['ensureWasmModuleLoaded'] = async () => {
   const bindings = await loadRealBindings()
+  if (wasmBytes === null) {
+    wasmBytes = readFileSync(wasmPath)
+  }
   if (realWasmInitPromise === null) {
     realWasmInitPromise = bindings.default(
-      { module_or_path: wasmBytes },
+      wasmBytes,
     ) as ReturnType<WorkerDependencies['ensureWasmModuleLoaded']>
   }
   return realWasmInitPromise
