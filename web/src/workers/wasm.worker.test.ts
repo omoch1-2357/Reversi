@@ -70,6 +70,8 @@ const reversiModulePath = resolve(
   '../wasm/pkg/reversi.js',
 )
 const hasRealWasmBindings = existsSync(wasmPath) && existsSync(reversiModulePath)
+const isCi = process.env.CI === 'true'
+const requireRealWasm = process.env.REQUIRE_REAL_WASM === 'true' || isCi
 
 type ReversiBindingsModule = {
   default: (input?: unknown) => Promise<unknown>
@@ -442,15 +444,25 @@ describe('wasm worker handler', () => {
   })
 })
 
-const describeRealWasm = hasRealWasmBindings ? describe : describe.skip
-
-describeRealWasm('wasm worker deterministic integration', () => {
-  it('produces identical ai steps and final result across repeated runs', async () => {
-    const first = await runDeterministicGameWithWorkerHandler(1)
-    const second = await runDeterministicGameWithWorkerHandler(1)
-
-    expect(first).toEqual(second)
-    expect(first.aiStepFingerprint.length).toBeGreaterThan(0)
-    expect(first.result).toEqual(expectedDeterministicResult)
+if (requireRealWasm && !hasRealWasmBindings) {
+  describe('wasm worker deterministic integration', () => {
+    it('requires generated wasm bindings when CI/REQUIRE_REAL_WASM is enabled', () => {
+      throw new Error(
+        `Missing real wasm bindings for deterministic integration: expected ${reversiModulePath} and ${wasmPath}.`,
+      )
+    })
   })
-})
+} else {
+  const describeRealWasm = hasRealWasmBindings ? describe : describe.skip
+
+  describeRealWasm('wasm worker deterministic integration', () => {
+    it('produces identical ai steps and final result across repeated runs', async () => {
+      const first = await runDeterministicGameWithWorkerHandler(1)
+      const second = await runDeterministicGameWithWorkerHandler(1)
+
+      expect(first).toEqual(second)
+      expect(first.aiStepFingerprint.length).toBeGreaterThan(0)
+      expect(first.result).toEqual(expectedDeterministicResult)
+    })
+  })
+}
