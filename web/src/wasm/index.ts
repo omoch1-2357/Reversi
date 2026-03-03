@@ -38,7 +38,10 @@ export const ensureWasmModuleLoaded = (
   input?: InitInput | Promise<InitInput>,
 ): Promise<InitOutput> => {
   if (wasmInitPromise === null) {
-    wasmInitPromise = init(input)
+    wasmInitPromise = init(input).catch((error: unknown) => {
+      wasmInitPromise = null
+      throw error
+    })
   }
   return wasmInitPromise
 }
@@ -46,6 +49,7 @@ export const ensureWasmModuleLoaded = (
 export const wasmReady = (): boolean => wasmReadyRaw()
 
 export const initGame = (level: number): GameState => {
+  assertValidLevel(level)
   assertWasmReady()
   return asGameState(wasmInitGame(level), 'init_game')
 }
@@ -147,4 +151,10 @@ const asNumberArray = (value: unknown, label: string): number[] => {
   }
 
   return value.map((entry, index) => asNumber(entry, `${label}[${index}]`))
+}
+
+const assertValidLevel = (level: number): void => {
+  if (!Number.isInteger(level) || level < 1 || level > 6) {
+    throw new Error('level must be an integer between 1 and 6')
+  }
 }
