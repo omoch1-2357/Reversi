@@ -19,3 +19,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^python/.*\.py$
+      - id: web-eslint
+        name: eslint (web)
+        entry: npm --prefix web run lint
+        language: system
+        pass_filenames: false
+        files: ^web/.*$
