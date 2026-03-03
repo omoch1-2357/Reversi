@@ -83,6 +83,9 @@ type ReversiBindingsModule = {
 let realBindingsModule: ReversiBindingsModule | null = null
 const wasmBytes = hasRealWasmBindings ? readFileSync(wasmPath) : new Uint8Array(0)
 let realWasmInitPromise: ReturnType<WorkerDependencies['ensureWasmModuleLoaded']> | null = null
+// Deterministic baseline from real WASM integration: level=1, player always picks
+// the first legal move (moves[0]) until game_over, with no RNG involved. These
+// values are the resulting final stone counts and winner for that exact flow.
 const expectedDeterministicResult: GameResult = {
   winner: 2,
   black_count: 19,
