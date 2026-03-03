@@ -1,15 +1,8 @@
 /// <reference types="node" />
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import initWasmRaw, {
-  ai_move as aiMoveRaw,
-  get_legal_moves as getLegalMovesRaw,
-  get_result as getResultRaw,
-  init_game as initGameRaw,
-  place_stone as placeStoneRaw,
-} from '../wasm/pkg/reversi'
 import type { GameResult, GameState, Position } from '../wasm'
 import {
   createWorkerMessageHandler,
@@ -72,29 +65,68 @@ const wasmPath = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../wasm/pkg/reversi_bg.wasm',
 )
-const wasmBytes = readFileSync(wasmPath)
-let realWasmInitPromise: ReturnType<typeof initWasmRaw> | null = null
+const reversiModulePath = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../wasm/pkg/reversi.js',
+)
+const hasRealWasmBindings = existsSync(wasmPath) && existsSync(reversiModulePath)
+
+type ReversiBindingsModule = {
+  default: (input?: unknown) => Promise<unknown>
+  init_game: (level: number) => unknown
+  get_legal_moves: () => unknown
+  place_stone: (row: number, col: number) => unknown
+  ai_move: () => unknown
+  get_result: () => unknown
+}
+
+let realBindingsModule: ReversiBindingsModule | null = null
+const wasmBytes = hasRealWasmBindings ? readFileSync(wasmPath) : new Uint8Array(0)
+let realWasmInitPromise: ReturnType<WorkerDependencies['ensureWasmModuleLoaded']> | null = null
 const expectedDeterministicResult: GameResult = {
   winner: 2,
   black_count: 19,
   white_count: 45,
 }
 
+const loadRealBindings = async (): Promise<ReversiBindingsModule> => {
+  if (!hasRealWasmBindings) {
+    throw new Error('real wasm bindings are not available')
+  }
+
+  if (realBindingsModule === null) {
+    realBindingsModule = (await import(
+      pathToFileURL(reversiModulePath).href
+    )) as ReversiBindingsModule
+  }
+  return realBindingsModule
+}
+
+const getLoadedBindings = (): ReversiBindingsModule => {
+  if (realBindingsModule === null) {
+    throw new Error('real wasm bindings are not loaded')
+  }
+  return realBindingsModule
+}
+
 const ensureRealWasmLoaded: WorkerDependencies['ensureWasmModuleLoaded'] = async () => {
+  const bindings = await loadRealBindings()
   if (realWasmInitPromise === null) {
-    realWasmInitPromise = initWasmRaw(wasmBytes)
+    realWasmInitPromise = bindings.default(
+      { module_or_path: wasmBytes },
+    ) as ReturnType<WorkerDependencies['ensureWasmModuleLoaded']>
   }
   return realWasmInitPromise
 }
 
 const realWasmDependencies: WorkerDependencies = {
   ensureWasmModuleLoaded: ensureRealWasmLoaded,
-  initGame: (level: number): GameState => initGameRaw(level) as GameState,
-  getLegalMoves: (): Position[] => getLegalMovesRaw() as Position[],
+  initGame: (level: number): GameState => getLoadedBindings().init_game(level) as GameState,
+  getLegalMoves: (): Position[] => getLoadedBindings().get_legal_moves() as Position[],
   placeStone: (row: number, col: number): GameState =>
-    placeStoneRaw(row, col) as GameState,
-  aiMove: (): GameState => aiMoveRaw() as GameState,
-  getResult: (): GameResult => getResultRaw() as GameResult,
+    getLoadedBindings().place_stone(row, col) as GameState,
+  aiMove: (): GameState => getLoadedBindings().ai_move() as GameState,
+  getResult: (): GameResult => getLoadedBindings().get_result() as GameResult,
 }
 
 const runDeterministicGameWithWorkerHandler = async (
@@ -407,7 +439,9 @@ describe('wasm worker handler', () => {
   })
 })
 
-describe('wasm worker deterministic integration', () => {
+const describeRealWasm = hasRealWasmBindings ? describe : describe.skip
+
+describeRealWasm('wasm worker deterministic integration', () => {
   it('produces identical ai steps and final result across repeated runs', async () => {
     const first = await runDeterministicGameWithWorkerHandler(1)
     const second = await runDeterministicGameWithWorkerHandler(1)
