@@ -141,7 +141,7 @@
 
 ### 4-2. WASM TypeScript ラッパー
 
-- [ ] `wasm/index.ts` — 型アサーション付きラッパー関数
+- [x] `wasm/index.ts` — 型アサーション付きラッパー関数
 
 ### 4-3. Web Worker
 
