@@ -150,6 +150,25 @@ describe('wasm worker handler', () => {
     ])
   })
 
+  it('posts error and exits when AI loop exceeds safety cap', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const afterPlayerMove = makeGameState({ current_player: 2 })
+    const loopingState = makeGameState({ current_player: 2, is_game_over: false })
+    wasmMock.placeStone.mockReturnValueOnce(afterPlayerMove)
+    wasmMock.aiMove.mockImplementation(() => loopingState)
+
+    await handler({ data: { type: 'place_stone', payload: { row: 1, col: 1 } } })
+
+    expect(wasmMock.aiMove).toHaveBeenCalledTimes(64)
+    expect(wasmMock.getLegalMoves).not.toHaveBeenCalled()
+    expect(wasmMock.getResult).not.toHaveBeenCalled()
+    expect(posted[posted.length - 1]).toEqual({
+      type: 'error',
+      payload: 'AI move loop exceeded safety cap (64)',
+    })
+  })
+
   it('posts game_over immediately if place_stone ends the game', async () => {
     const { scope, posted } = makeScope()
     const handler = createWorkerMessageHandler(scope)
@@ -188,6 +207,26 @@ describe('wasm worker handler', () => {
     expect(posted).toEqual([
       { type: 'error', payload: 'Unknown worker message type: unknown' },
     ])
+  })
+
+  it('posts error for null message data without initializing wasm', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+
+    await handler({ data: null as unknown as WorkerRequest })
+
+    expect(wasmMock.ensureWasmModuleLoaded).not.toHaveBeenCalled()
+    expect(posted).toEqual([{ type: 'error', payload: 'Invalid worker message shape' }])
+  })
+
+  it('posts error for message data missing type without initializing wasm', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+
+    await handler({ data: {} as unknown as WorkerRequest })
+
+    expect(wasmMock.ensureWasmModuleLoaded).not.toHaveBeenCalled()
+    expect(posted).toEqual([{ type: 'error', payload: 'Invalid worker message shape' }])
   })
 
   it('installWorkerMessageHandler wires onmessage to worker message logic', async () => {

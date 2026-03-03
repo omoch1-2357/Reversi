@@ -54,6 +54,9 @@ const defaultDependencies: WorkerDependencies = {
   getResult,
 }
 
+const MAX_AI_STEPS = 64
+const INVALID_MESSAGE_SHAPE = 'Invalid worker message shape'
+
 export const createWorkerMessageHandler = (
   scope: WorkerScopeLike,
   dependencies: WorkerDependencies = defaultDependencies,
@@ -64,7 +67,18 @@ export const createWorkerMessageHandler = (
   }
 
   return async (event: WorkerMessageEvent): Promise<void> => {
-    const request = event.data
+    const maybeRequest = event.data as unknown
+    if (
+      typeof maybeRequest !== 'object'
+      || maybeRequest === null
+      || !('type' in maybeRequest)
+      || typeof (maybeRequest as { type: unknown }).type !== 'string'
+    ) {
+      scope.postMessage({ type: 'error', payload: INVALID_MESSAGE_SHAPE })
+      return
+    }
+
+    const request = maybeRequest as IncomingWorkerRequest
 
     try {
       switch (request.type) {
@@ -89,7 +103,16 @@ export const createWorkerMessageHandler = (
             return
           }
 
+          let aiStepCount = 0
           while (state.current_player === 2 && !state.is_game_over) {
+            if (aiStepCount >= MAX_AI_STEPS) {
+              scope.postMessage({
+                type: 'error',
+                payload: `AI move loop exceeded safety cap (${MAX_AI_STEPS})`,
+              })
+              return
+            }
+            aiStepCount += 1
             state = dependencies.aiMove()
             scope.postMessage({ type: 'ai_step', payload: { state } })
           }
