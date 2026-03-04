@@ -1,0 +1,43 @@
+.cell {
+  position: relative;
+  border: 1px solid #111827;
+  background: #2f855a;
+  cursor: not-allowed;
+  padding: 0;
+}
+
+.cell::before {
+  content: "";
+  position: absolute;
+  inset: 30%;
+  border-radius: 50%;
+  opacity: 0.9;
+  background: #93c5fd;
+}
+
+.cell--legal {
+  cursor: pointer;
+}
+
+.cell--legal::before {
+  opacity: 1;
+}
+
+.cell:not(.cell--legal)::before {
+  opacity: 0;
+}
+
+.stone {
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+}
+
+.cell--black .stone {
+  background: #111827;
+}
+
+.cell--white .stone {
+  background: #ffffff;
+  border: 1px solid #9ca3af;
+}

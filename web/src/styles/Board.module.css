@@ -1,0 +1,26 @@
+.board-shell {
+  min-width: 352px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+}
+
+.board-shell__title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.board {
+  width: min(100%, 480px);
+  margin-inline: auto;
+  aspect-ratio: 1;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(44px, 1fr));
+  grid-template-rows: repeat(8, minmax(44px, 1fr));
+  gap: 0;
+  border: 1px solid #111827;
+  background: #2f855a;
+}

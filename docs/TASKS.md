@@ -150,10 +150,10 @@
 
 ### 4-4. React コンポーネント
 
-- [ ] `LevelSelect.tsx` — レベル(1〜6)選択画面
-- [ ] `Board.tsx` + `Cell.tsx` — 盤面描画、着手可能マスハイライト、反転アニメーション
-- [ ] `GameInfo.tsx` — 石数・手番・思考中インジケータ
-- [ ] `ResultModal.tsx` — 勝敗表示 + リスタートボタン
+- [x] `LevelSelect.tsx` — レベル(1〜6)選択画面
+- [x] `Board.tsx` + `Cell.tsx` — 盤面描画、着手可能マスハイライト、反転表示（シンプル実装）
+- [x] `GameInfo.tsx` — 石数・手番・思考中インジケータ
+- [x] `ResultModal.tsx` — 勝敗表示 + リスタートボタン
 
 ### 4-5. 状態管理フック
 

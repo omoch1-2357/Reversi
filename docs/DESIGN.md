@@ -68,7 +68,7 @@ impl Board {
     pub fn new() -> Self;
 
     /// 指定位置に着手し、反転処理を行う
-    /// 戻り値: 反転した石のビットマスク（アニメーション用）
+    /// 戻り値: 反転した石のビットマスク（UI反映用）
     pub fn place(&mut self, pos: usize, is_black: bool) -> u64;
 
     /// 指定プレイヤーの合法手ビットマスクを返す
@@ -150,7 +150,7 @@ Rust側 ai_move() の責務:
   - AI合法手なし → パス処理（is_pass=true）。相手も合法手なしなら終局
 
 Worker側の責務:
-  - ai_move() を呼び出し、各結果を 'ai_step' として通知（反転アニメーション用）
+  - ai_move() を呼び出し、各結果を 'ai_step' として通知（盤面更新用）
   - 戻り値の current_player === 2 && !is_game_over なら再度 ai_move() を呼ぶ
   - current_player === 1（プレイヤー手番）または is_game_over で終了
 ```
@@ -860,7 +860,7 @@ self.onmessage = async (e: MessageEvent) => {
           let currentState = newState;
           while (currentState.current_player === 2 && !currentState.is_game_over) {
             const aiState = ai_move();
-            // 各AI着手の反転アニメーション用状態を通知
+            // 各AI着手の盤面更新用状態を通知
             self.postMessage({ type: 'ai_step', payload: { state: aiState } });
             currentState = aiState;
           }
@@ -896,7 +896,7 @@ self.onmessage = async (e: MessageEvent) => {
 interface BoardProps {
   board: number[];           // 64要素: 0=空, 1=黒, 2=白
   legalMoves: Position[];    // 着手可能マス
-  flipped: number[];         // 反転された石（アニメーション用）
+  flipped: number[];         // 反転された石（表示更新用）
   isPlayerTurn: boolean;
   onCellClick: (row: number, col: number) => void;
 }
@@ -908,7 +908,7 @@ interface BoardProps {
 interface CellProps {
   value: number;             // 0=空, 1=黒, 2=白
   isLegal: boolean;          // 着手可能か
-  isFlipped: boolean;        // 反転アニメーション対象か
+  isFlipped: boolean;        // 直前に反転した石か
   onClick: () => void;
 }
 
@@ -917,21 +917,13 @@ interface CellProps {
 // .cell--black    - 黒石
 // .cell--white    - 白石
 // .cell--legal    - 着手可能マス（ハイライト）
-// .cell--flipped  - 反転アニメーション中
+// .cell--flipped  - 反転直後の表示クラス（演出は任意）
 ```
 
-#### 反転アニメーション
+#### 反転表示（シンプル実装）
 
 ```css
-.cell--flipped {
-  animation: flip 0.4s ease-in-out;
-}
-
-@keyframes flip {
-  0%   { transform: rotateY(0deg); }
-  50%  { transform: rotateY(90deg); }
-  100% { transform: rotateY(180deg); }
-}
+.cell--flipped { /* 必須演出なし。必要に応じて強調表示を追加 */ }
 ```
 
 ### 4.6 レスポンシブ設計
