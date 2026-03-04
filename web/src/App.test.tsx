@@ -11,6 +11,13 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  const openingCells = [
+    'Cell 3-4 legal move',
+    'Cell 4-3 legal move',
+    'Cell 5-6 legal move',
+    'Cell 6-5 legal move',
+  ] as const
+
   it('starts from level select and transitions to game preview', async () => {
     const user = userEvent.setup()
 
@@ -42,61 +49,68 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
   })
 
-  it.each([1, 2, 3, 4, 5, 6])(
-    'runs deterministic AI timer flow based on selected level %i',
-    async (level) => {
-    vi.useFakeTimers()
-    const delaySpy = vi.spyOn(DemoAiModule.demoAiLogic, 'getAIDelay')
-    const chooseSpy = vi.spyOn(DemoAiModule.demoAiLogic, 'chooseAIMoveIndex')
-    const snapshots: string[] = []
+  describe.each([1, 2, 3, 4, 5, 6])('selected level %i', (level) => {
+    it.each(openingCells)(
+      'runs deterministic AI timer flow for opening %s',
+      async (openingCell) => {
+        vi.useFakeTimers()
+        const delaySpy = vi.spyOn(DemoAiModule.demoAiLogic, 'getAIDelay')
+        const chooseSpy = vi.spyOn(DemoAiModule.demoAiLogic, 'chooseAIMoveIndex')
+        const snapshots: string[] = []
 
-    for (let run = 0; run < 2; run += 1) {
-      const { unmount } = render(<App />)
+        for (let run = 0; run < 2; run += 1) {
+          const { unmount } = render(<App />)
 
-      fireEvent.click(screen.getByRole('button', { name: `Level ${level}` }))
-      fireEvent.click(screen.getByRole('button', { name: `Start level ${level}` }))
-      fireEvent.click(screen.getByRole('button', { name: 'Cell 3-4 legal move' }))
+          fireEvent.click(screen.getByRole('button', { name: `Level ${level}` }))
+          fireEvent.click(screen.getByRole('button', { name: `Start level ${level}` }))
+          fireEvent.click(screen.getByRole('button', { name: openingCell }))
 
-      expect(screen.getByRole('status')).toHaveTextContent('AI is thinking...')
-      expect(delaySpy).toHaveBeenLastCalledWith(level)
-      const delayMs = delaySpy.mock.results.at(-1)?.value
-      expect(typeof delayMs).toBe('number')
+          expect(screen.getByRole('status')).toHaveTextContent('AI is thinking...')
+          expect(delaySpy).toHaveBeenLastCalledWith(level)
+          const delayMs = delaySpy.mock.results.at(-1)?.value
+          expect(typeof delayMs).toBe('number')
 
-      act(() => {
-        vi.advanceTimersByTime(delayMs as number)
-      })
+          act(() => {
+            vi.advanceTimersByTime(delayMs as number)
+          })
 
-      expect(chooseSpy).toHaveBeenCalledWith(expect.any(Array), level, expect.any(Array))
-      expect(screen.queryByRole('status')).not.toBeInTheDocument()
-      expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
+          expect(chooseSpy).toHaveBeenCalledWith(expect.any(Array), level, expect.any(Array))
+          expect(screen.queryByRole('status')).not.toBeInTheDocument()
+          expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
 
-      const legalMoves = screen
-        .getAllByRole('button', { name: /legal move/ })
-        .map((button) => button.getAttribute('aria-label'))
-        .sort()
-      expect(legalMoves.length).toBeGreaterThan(0)
+          const legalMoves = screen
+            .getAllByRole('button', { name: /legal move/ })
+            .map((button) => button.getAttribute('aria-label'))
+            .sort()
+          expect(legalMoves.length).toBeGreaterThan(0)
 
-      const boardSignature = screen
-        .getAllByRole('button', { name: /^Cell / })
-        .map((button) => {
-          const className = String(button.className)
-          if (className.includes('cell--black')) {
-            return 'B'
-          }
-          if (className.includes('cell--white')) {
-            return 'W'
-          }
-          return '_'
-        })
-        .join('')
-      const flippedCount = document.querySelectorAll('button[class*="cell--flipped"]').length
-      snapshots.push(`${boardSignature}|${legalMoves.join(',')}|flipped:${flippedCount}`)
+          fireEvent.click(screen.getByRole('button', { name: 'Preview result' }))
+          expect(screen.getByRole('dialog', { name: 'Game result' })).toBeInTheDocument()
+          fireEvent.click(screen.getByRole('button', { name: 'Restart' }))
+          expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
 
-      unmount()
-      cleanup()
-    }
+          const boardSignature = screen
+            .getAllByRole('button', { name: /^Cell / })
+            .map((button) => {
+              const className = String(button.className)
+              if (className.includes('cell--black')) {
+                return 'B'
+              }
+              if (className.includes('cell--white')) {
+                return 'W'
+              }
+              return '_'
+            })
+            .join('')
+          const flippedCount = document.querySelectorAll('button[class*="cell--flipped"]').length
+          snapshots.push(`${boardSignature}|${legalMoves.join(',')}|flipped:${flippedCount}`)
 
-    expect(snapshots[0]).toBe(snapshots[1])
-    },
-  )
+          unmount()
+          cleanup()
+        }
+
+        expect(snapshots[0]).toBe(snapshots[1])
+      },
+    )
+  })
 })

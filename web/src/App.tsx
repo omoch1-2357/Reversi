@@ -31,16 +31,10 @@ const BOARD_CELLS = 64
 const BOARD_WIDTH = 8
 const OPENING_BLACK = [28, 35]
 const OPENING_WHITE = [27, 36]
-const OPENING_LEGAL_MOVES: Position[] = [
-  { row: 2, col: 3 },
-  { row: 3, col: 2 },
-  { row: 4, col: 5 },
-  { row: 5, col: 4 },
-]
-const FOLLOWUP_LEGAL_MOVES: Position[] = [
-  { row: 2, col: 2 },
-  { row: 2, col: 4 },
-  { row: 4, col: 2 },
+const DIRECTIONS: Array<[number, number]> = [
+  [-1, -1], [-1, 0], [-1, 1],
+  [0, -1], [0, 1],
+  [1, -1], [1, 0], [1, 1],
 ]
 
 const createInitialBoard = (): number[] => {
@@ -57,11 +51,75 @@ const createInitialBoard = (): number[] => {
 const countStones = (board: number[], stone: number): number =>
   board.reduce((count, cell) => count + (cell === stone ? 1 : 0), 0)
 
+const toPositions = (indices: number[]): Position[] =>
+  indices.map((index) => ({
+    row: Math.floor(index / BOARD_WIDTH),
+    col: index % BOARD_WIDTH,
+  }))
+
+const isInBounds = (row: number, col: number): boolean =>
+  row >= 0 && row < BOARD_WIDTH && col >= 0 && col < BOARD_WIDTH
+
+const collectFlippedIndices = (board: number[], moveIndex: number, player: Player): number[] => {
+  if (moveIndex < 0 || moveIndex >= BOARD_CELLS || board[moveIndex] !== 0) {
+    return []
+  }
+
+  const row = Math.floor(moveIndex / BOARD_WIDTH)
+  const col = moveIndex % BOARD_WIDTH
+  const opponent = player === PLAYER_BLACK ? PLAYER_WHITE : PLAYER_BLACK
+  const flipped: number[] = []
+
+  for (const [rowDelta, colDelta] of DIRECTIONS) {
+    let r = row + rowDelta
+    let c = col + colDelta
+    const line: number[] = []
+
+    while (isInBounds(r, c)) {
+      const index = r * BOARD_WIDTH + c
+      const cell = board[index]
+      if (cell === opponent) {
+        line.push(index)
+        r += rowDelta
+        c += colDelta
+        continue
+      }
+      if (cell === player && line.length > 0) {
+        flipped.push(...line)
+      }
+      break
+    }
+  }
+
+  return flipped
+}
+
+const applyMove = (
+  board: number[],
+  moveIndex: number,
+  player: Player,
+): { board: number[], flipped: number[] } => {
+  const flipped = collectFlippedIndices(board, moveIndex, player)
+  if (flipped.length === 0) {
+    return { board, flipped: [] }
+  }
+
+  const nextBoard = board.slice()
+  nextBoard[moveIndex] = player
+  for (const index of flipped) {
+    nextBoard[index] = player
+  }
+  return { board: nextBoard, flipped }
+}
+
+const createInitialLegalMoves = (): Position[] =>
+  toPositions(demoAiLogic.getLegalMoveIndices(createInitialBoard(), PLAYER_BLACK))
+
 function App() {
   const [screen, setScreen] = useState<Screen>('level_select')
   const [selectedLevel, setSelectedLevel] = useState(3)
   const [board, setBoard] = useState<number[]>(() => createInitialBoard())
-  const [legalMoves, setLegalMoves] = useState<Position[]>(OPENING_LEGAL_MOVES)
+  const [legalMoves, setLegalMoves] = useState<Position[]>(() => createInitialLegalMoves())
   const [flipped, setFlipped] = useState<number[]>([])
   const [currentPlayer, setCurrentPlayer] = useState<Player>(PLAYER_BLACK)
   const [isThinking, setIsThinking] = useState(false)
@@ -97,7 +155,7 @@ function App() {
       aiTimerRef.current = null
     }
     setBoard(createInitialBoard())
-    setLegalMoves(OPENING_LEGAL_MOVES)
+    setLegalMoves(createInitialLegalMoves())
     setFlipped([])
     setCurrentPlayer(PLAYER_BLACK)
     setIsThinking(false)
@@ -120,26 +178,28 @@ function App() {
       return
     }
 
-    const boardAfterPlayerMove = board.slice()
-    boardAfterPlayerMove[selectedIndex] = PLAYER_BLACK
+    const playerMove = applyMove(board, selectedIndex, PLAYER_BLACK)
+    if (playerMove.flipped.length === 0) {
+      return
+    }
 
-    const playerFlipMap: Record<number, number[]> = {
-      19: [27],
-      26: [27],
-      37: [36],
-      44: [36],
-    }
-    const playerFlipped = playerFlipMap[selectedIndex] ?? []
-    for (const index of playerFlipped) {
-      if (boardAfterPlayerMove[index] === PLAYER_WHITE) {
-        boardAfterPlayerMove[index] = PLAYER_BLACK
-      }
-    }
+    const boardAfterPlayerMove = playerMove.board
+    const aiLegalMoves = demoAiLogic.getLegalMoveIndices(boardAfterPlayerMove, PLAYER_WHITE)
 
     setBoard(boardAfterPlayerMove)
-    setFlipped(playerFlipped)
+    setFlipped(playerMove.flipped)
     setLegalMoves([])
     setCurrentPlayer(PLAYER_WHITE)
+
+    if (aiLegalMoves.length === 0) {
+      setCurrentPlayer(PLAYER_BLACK)
+      setLegalMoves(
+        toPositions(demoAiLogic.getLegalMoveIndices(boardAfterPlayerMove, PLAYER_BLACK)),
+      )
+      setIsThinking(false)
+      return
+    }
+
     setIsThinking(true)
 
     if (aiTimerRef.current !== null) {
@@ -147,35 +207,25 @@ function App() {
     }
 
     aiTimerRef.current = window.setTimeout(() => {
-      const boardAfterAiMove = boardAfterPlayerMove.slice()
-      const aiLegalMoves = demoAiLogic.getLegalMoveIndices(boardAfterAiMove, PLAYER_WHITE)
+      const boardBeforeAiMove = boardAfterPlayerMove.slice()
+      const aiLegalMoves = demoAiLogic.getLegalMoveIndices(boardBeforeAiMove, PLAYER_WHITE)
       const aiMoveIndex = demoAiLogic.chooseAIMoveIndex(
-        boardAfterAiMove,
+        boardBeforeAiMove,
         selectedLevel,
         aiLegalMoves,
       )
-      if (aiMoveIndex >= 0) {
-        boardAfterAiMove[aiMoveIndex] = PLAYER_WHITE
-      }
-
-      const aiFlipped =
-        aiMoveIndex === 20 && boardAfterAiMove[28] === PLAYER_BLACK
-          ? [28]
-          : []
-      for (const index of aiFlipped) {
-        boardAfterAiMove[index] = PLAYER_WHITE
-      }
+      const aiMove =
+        aiMoveIndex >= 0
+          ? applyMove(boardBeforeAiMove, aiMoveIndex, PLAYER_WHITE)
+          : { board: boardBeforeAiMove, flipped: [] }
+      const boardAfterAiMove = aiMove.board
+      const blackLegalMoves = demoAiLogic.getLegalMoveIndices(boardAfterAiMove, PLAYER_BLACK)
 
       setBoard(boardAfterAiMove)
-      setFlipped(aiFlipped)
+      setFlipped(aiMove.flipped)
       setCurrentPlayer(PLAYER_BLACK)
       setIsThinking(false)
-      setLegalMoves(
-        FOLLOWUP_LEGAL_MOVES.filter(
-          ({ row: moveRow, col: moveCol }) =>
-            boardAfterAiMove[moveRow * BOARD_WIDTH + moveCol] === 0,
-        ),
-      )
+      setLegalMoves(toPositions(blackLegalMoves))
       aiTimerRef.current = null
     }, demoAiLogic.getAIDelay(selectedLevel))
   }
