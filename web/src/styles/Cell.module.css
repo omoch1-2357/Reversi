@@ -41,7 +41,3 @@
   background: #ffffff;
   border: 1px solid #9ca3af;
 }
-
-.cell--flipped .stone {
-  transform: none;
-}

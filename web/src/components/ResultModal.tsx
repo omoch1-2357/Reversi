@@ -1,18 +1,19 @@
 import styles from '../styles/ResultModal.module.css'
+import { PLAYER_BLACK, PLAYER_WHITE, type Winner } from '../types/player'
 
 interface ResultModalProps {
   isOpen: boolean
-  winner: number
+  winner: Winner
   blackCount: number
   whiteCount: number
   onRestart: () => void
 }
 
-const getResultMessage = (winner: number): string => {
-  if (winner === 1) {
+const getResultMessage = (winner: Winner): string => {
+  if (winner === PLAYER_BLACK) {
     return 'Black wins'
   }
-  if (winner === 2) {
+  if (winner === PLAYER_WHITE) {
     return 'White wins'
   }
   return 'Draw game'

@@ -4,6 +4,7 @@ import Board from './components/Board'
 import GameInfo from './components/GameInfo'
 import LevelSelect from './components/LevelSelect'
 import ResultModal from './components/ResultModal'
+import { PLAYER_BLACK, PLAYER_WHITE, type Player, type Winner } from './types/player'
 import workerUrl from './workers/wasm.worker.ts?worker&url'
 import type { Position } from './wasm'
 
@@ -20,13 +21,11 @@ if (typeof window !== 'undefined') {
 type Screen = 'level_select' | 'game'
 
 interface DemoResult {
-  winner: number
+  winner: Winner
   black_count: number
   white_count: number
 }
 
-const PLAYER_BLACK = 1
-const AI_WHITE = 2
 const BOARD_CELLS = 64
 const BOARD_WIDTH = 8
 const OPENING_BLACK = [28, 35]
@@ -49,7 +48,7 @@ const createInitialBoard = (): number[] => {
     board[index] = PLAYER_BLACK
   }
   for (const index of OPENING_WHITE) {
-    board[index] = AI_WHITE
+    board[index] = PLAYER_WHITE
   }
   return board
 }
@@ -63,7 +62,7 @@ function App() {
   const [board, setBoard] = useState<number[]>(() => createInitialBoard())
   const [legalMoves, setLegalMoves] = useState<Position[]>(OPENING_LEGAL_MOVES)
   const [flipped, setFlipped] = useState<number[]>([])
-  const [currentPlayer, setCurrentPlayer] = useState<number>(PLAYER_BLACK)
+  const [currentPlayer, setCurrentPlayer] = useState<Player>(PLAYER_BLACK)
   const [isThinking, setIsThinking] = useState(false)
   const [isResultOpen, setIsResultOpen] = useState(false)
   const [result, setResult] = useState<DemoResult>({
@@ -78,7 +77,7 @@ function App() {
     [board],
   )
   const whiteCount = useMemo(
-    () => countStones(board, AI_WHITE),
+    () => countStones(board, PLAYER_WHITE),
     [board],
   )
 
@@ -131,7 +130,7 @@ function App() {
     }
     const playerFlipped = playerFlipMap[selectedIndex] ?? []
     for (const index of playerFlipped) {
-      if (boardAfterPlayerMove[index] === AI_WHITE) {
+      if (boardAfterPlayerMove[index] === PLAYER_WHITE) {
         boardAfterPlayerMove[index] = PLAYER_BLACK
       }
     }
@@ -139,7 +138,7 @@ function App() {
     setBoard(boardAfterPlayerMove)
     setFlipped(playerFlipped)
     setLegalMoves([])
-    setCurrentPlayer(AI_WHITE)
+    setCurrentPlayer(PLAYER_WHITE)
     setIsThinking(true)
 
     if (aiTimerRef.current !== null) {
@@ -152,7 +151,7 @@ function App() {
         ? 20
         : boardAfterAiMove.findIndex((cell) => cell === 0)
       if (aiMoveIndex >= 0) {
-        boardAfterAiMove[aiMoveIndex] = AI_WHITE
+        boardAfterAiMove[aiMoveIndex] = PLAYER_WHITE
       }
 
       const aiFlipped =
@@ -160,7 +159,7 @@ function App() {
           ? [28]
           : []
       for (const index of aiFlipped) {
-        boardAfterAiMove[index] = AI_WHITE
+        boardAfterAiMove[index] = PLAYER_WHITE
       }
 
       setBoard(boardAfterAiMove)
@@ -179,9 +178,13 @@ function App() {
 
   const handlePreviewResult = (): void => {
     const finalBlack = countStones(board, PLAYER_BLACK)
-    const finalWhite = countStones(board, AI_WHITE)
+    const finalWhite = countStones(board, PLAYER_WHITE)
     setResult({
-      winner: finalBlack === finalWhite ? 0 : finalBlack > finalWhite ? PLAYER_BLACK : AI_WHITE,
+      winner: finalBlack === finalWhite
+        ? 0
+        : finalBlack > finalWhite
+          ? PLAYER_BLACK
+          : PLAYER_WHITE,
       black_count: finalBlack,
       white_count: finalWhite,
     })
@@ -236,7 +239,10 @@ function App() {
               <button
                 type="button"
                 className="game-controls__button game-controls__button--subtle"
-                onClick={() => setScreen('level_select')}
+                onClick={() => {
+                  resetDemoGame()
+                  setScreen('level_select')
+                }}
               >
                 Back to level select
               </button>

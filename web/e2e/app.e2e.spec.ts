@@ -1,15 +1,21 @@
 import { expect, test } from '@playwright/test'
 
-test('renders initial UI and increments counter', async ({ page }) => {
+test('app flow: level select -> board -> result modal -> restart', async ({ page }) => {
   await page.goto('/Reversi/')
 
-  await expect(page.getByRole('heading', { name: 'Vite + React' })).toBeVisible()
-  const counterButton = page.getByRole('button', { name: 'count is 0' })
-  await expect(counterButton).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Select difficulty' })).toBeVisible()
 
-  await counterButton.click()
+  await page.getByRole('button', { name: 'Level 4' }).click()
+  await page.getByRole('button', { name: 'Start level 4' }).click()
 
-  await expect(page.getByRole('button', { name: 'count is 1' })).toBeVisible()
+  await expect(page.getByRole('grid', { name: 'Reversi board' })).toBeVisible()
+  await expect(page.getByText('Your turn (Black)')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Preview result' }).click()
+  await expect(page.getByRole('dialog', { name: 'Game result' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Restart' }).click()
+  await expect(page.getByRole('dialog', { name: 'Game result' })).toHaveCount(0)
 })
 
 test('worker e2e flow is deterministic with real wasm', async ({ page }) => {

@@ -1,6 +1,10 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import GameInfo from './GameInfo'
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('GameInfo', () => {
   it('shows stone counts, turn label, and thinking indicator', () => {
@@ -20,5 +24,47 @@ describe('GameInfo', () => {
     expect(screen.getByText('12')).toBeInTheDocument()
     expect(screen.getByText('AI turn (White)')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('AI is thinking...')
+  })
+
+  it('shows player turn label when current player is black', () => {
+    render(
+      <GameInfo
+        blackCount={10}
+        whiteCount={8}
+        currentPlayer={1}
+        isThinking={false}
+        isGameOver={false}
+      />,
+    )
+
+    expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
+  })
+
+  it('does not render thinking indicator when isThinking is false', () => {
+    render(
+      <GameInfo
+        blackCount={22}
+        whiteCount={20}
+        currentPlayer={2}
+        isThinking={false}
+        isGameOver={false}
+      />,
+    )
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('shows game over state when the game is finished', () => {
+    render(
+      <GameInfo
+        blackCount={33}
+        whiteCount={31}
+        currentPlayer={1}
+        isThinking={false}
+        isGameOver
+      />,
+    )
+
+    expect(screen.getByText('Game over')).toBeInTheDocument()
   })
 })

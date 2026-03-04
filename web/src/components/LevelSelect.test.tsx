@@ -1,7 +1,11 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import LevelSelect from './LevelSelect'
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('LevelSelect', () => {
   it('renders level options and sends level change events', async () => {
@@ -25,5 +29,52 @@ describe('LevelSelect', () => {
 
     await user.click(screen.getByRole('button', { name: 'Start level 3' }))
     expect(onStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables level options and start button when disabled is true', () => {
+    const onLevelChange = vi.fn()
+    const onStart = vi.fn()
+    render(
+      <LevelSelect
+        selectedLevel={3}
+        disabled
+        onLevelChange={onLevelChange}
+        onStart={onStart}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /^Level 1$/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Level 6$/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Start level 3' })).toBeDisabled()
+  })
+
+  it('shows preparing text while loading', () => {
+    const onLevelChange = vi.fn()
+    const onStart = vi.fn()
+    render(
+      <LevelSelect
+        selectedLevel={3}
+        isLoading
+        onLevelChange={onLevelChange}
+        onStart={onStart}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Preparing...' })).toBeDisabled()
+  })
+
+  it('renders alert message when error is provided', () => {
+    const onLevelChange = vi.fn()
+    const onStart = vi.fn()
+    render(
+      <LevelSelect
+        selectedLevel={3}
+        error="Model loading failed"
+        onLevelChange={onLevelChange}
+        onStart={onStart}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Model loading failed')
   })
 })
