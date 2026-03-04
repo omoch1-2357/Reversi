@@ -1,23 +1,37 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import App from './App'
 
-vi.mock('/vite.svg', () => ({ default: '/vite.svg' }))
-vi.mock('./assets/react.svg', () => ({ default: '/react.svg' }))
-
 describe('App', () => {
-  it('renders initial UI and increments counter on click', async () => {
+  it('starts from level select and transitions to game preview', async () => {
     const user = userEvent.setup()
 
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Vite + React' })).toBeInTheDocument()
-    const counterButton = screen.getByRole('button', { name: 'count is 0' })
-    expect(counterButton).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Select difficulty' }),
+    ).toBeInTheDocument()
 
-    await user.click(counterButton)
+    await user.click(screen.getByRole('button', { name: /^Level 4$/ }))
+    await user.click(screen.getByRole('button', { name: 'Start level 4' }))
 
-    expect(screen.getByRole('button', { name: 'count is 1' })).toBeInTheDocument()
+    expect(screen.getByRole('grid', { name: 'Reversi board' })).toBeInTheDocument()
+    expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
+  })
+
+  it('opens and closes the result modal via restart', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Start level 3' }))
+    const [previewButton] = screen.getAllByRole('button', { name: 'Preview result' })
+    await user.click(previewButton)
+
+    expect(screen.getByRole('dialog', { name: 'Game result' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Restart' }))
+
+    expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
   })
 })

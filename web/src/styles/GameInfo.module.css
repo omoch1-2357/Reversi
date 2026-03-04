@@ -1,0 +1,55 @@
+.game-info {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+}
+
+.game-info__title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.game-info__counts {
+  display: grid;
+  gap: 6px;
+}
+
+.game-info__counts p {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.game-info__counts strong {
+  font-size: 18px;
+}
+
+.game-info__label {
+  color: var(--text-muted);
+}
+
+.game-info__turn {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid #e5e7eb;
+  font-weight: 600;
+}
+
+.game-info__thinking {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+}
+
+.game-info__spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #111827;
+}

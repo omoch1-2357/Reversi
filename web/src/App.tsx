@@ -1,8 +1,11 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import Board from './components/Board'
+import GameInfo from './components/GameInfo'
+import LevelSelect from './components/LevelSelect'
+import ResultModal from './components/ResultModal'
 import workerUrl from './workers/wasm.worker.ts?worker&url'
+import type { Position } from './wasm'
 
 declare global {
   interface Window {
@@ -14,32 +17,242 @@ if (typeof window !== 'undefined') {
   window.__reversiWorkerUrl = workerUrl
 }
 
+type Screen = 'level_select' | 'game'
+
+interface DemoResult {
+  winner: number
+  black_count: number
+  white_count: number
+}
+
+const PLAYER_BLACK = 1
+const AI_WHITE = 2
+const BOARD_CELLS = 64
+const BOARD_WIDTH = 8
+const OPENING_BLACK = [28, 35]
+const OPENING_WHITE = [27, 36]
+const OPENING_LEGAL_MOVES: Position[] = [
+  { row: 2, col: 3 },
+  { row: 3, col: 2 },
+  { row: 4, col: 5 },
+  { row: 5, col: 4 },
+]
+const FOLLOWUP_LEGAL_MOVES: Position[] = [
+  { row: 2, col: 2 },
+  { row: 2, col: 4 },
+  { row: 4, col: 2 },
+]
+
+const createInitialBoard = (): number[] => {
+  const board = Array.from({ length: BOARD_CELLS }, () => 0)
+  for (const index of OPENING_BLACK) {
+    board[index] = PLAYER_BLACK
+  }
+  for (const index of OPENING_WHITE) {
+    board[index] = AI_WHITE
+  }
+  return board
+}
+
+const countStones = (board: number[], stone: number): number =>
+  board.reduce((count, cell) => count + (cell === stone ? 1 : 0), 0)
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [screen, setScreen] = useState<Screen>('level_select')
+  const [selectedLevel, setSelectedLevel] = useState(3)
+  const [board, setBoard] = useState<number[]>(() => createInitialBoard())
+  const [legalMoves, setLegalMoves] = useState<Position[]>(OPENING_LEGAL_MOVES)
+  const [flipped, setFlipped] = useState<number[]>([])
+  const [currentPlayer, setCurrentPlayer] = useState<number>(PLAYER_BLACK)
+  const [isThinking, setIsThinking] = useState(false)
+  const [isResultOpen, setIsResultOpen] = useState(false)
+  const [result, setResult] = useState<DemoResult>({
+    winner: 0,
+    black_count: 2,
+    white_count: 2,
+  })
+  const aiTimerRef = useRef<number | null>(null)
+
+  const blackCount = useMemo(
+    () => countStones(board, PLAYER_BLACK),
+    [board],
+  )
+  const whiteCount = useMemo(
+    () => countStones(board, AI_WHITE),
+    [board],
+  )
+
+  useEffect(
+    () => () => {
+      if (aiTimerRef.current !== null) {
+        window.clearTimeout(aiTimerRef.current)
+      }
+    },
+    [],
+  )
+
+  const resetDemoGame = (): void => {
+    if (aiTimerRef.current !== null) {
+      window.clearTimeout(aiTimerRef.current)
+      aiTimerRef.current = null
+    }
+    setBoard(createInitialBoard())
+    setLegalMoves(OPENING_LEGAL_MOVES)
+    setFlipped([])
+    setCurrentPlayer(PLAYER_BLACK)
+    setIsThinking(false)
+    setIsResultOpen(false)
+  }
+
+  const handleStartGame = (): void => {
+    resetDemoGame()
+    setScreen('game')
+  }
+
+  const handleCellClick = (row: number, col: number): void => {
+    if (currentPlayer !== PLAYER_BLACK || isThinking) {
+      return
+    }
+
+    const selectedIndex = row * BOARD_WIDTH + col
+    const legalSet = new Set(legalMoves.map((move) => move.row * BOARD_WIDTH + move.col))
+    if (!legalSet.has(selectedIndex)) {
+      return
+    }
+
+    const boardAfterPlayerMove = board.slice()
+    boardAfterPlayerMove[selectedIndex] = PLAYER_BLACK
+
+    const playerFlipMap: Record<number, number[]> = {
+      19: [27],
+      26: [27],
+      37: [36],
+      44: [36],
+    }
+    const playerFlipped = playerFlipMap[selectedIndex] ?? []
+    for (const index of playerFlipped) {
+      if (boardAfterPlayerMove[index] === AI_WHITE) {
+        boardAfterPlayerMove[index] = PLAYER_BLACK
+      }
+    }
+
+    setBoard(boardAfterPlayerMove)
+    setFlipped(playerFlipped)
+    setLegalMoves([])
+    setCurrentPlayer(AI_WHITE)
+    setIsThinking(true)
+
+    if (aiTimerRef.current !== null) {
+      window.clearTimeout(aiTimerRef.current)
+    }
+
+    aiTimerRef.current = window.setTimeout(() => {
+      const boardAfterAiMove = boardAfterPlayerMove.slice()
+      const aiMoveIndex = boardAfterAiMove[20] === 0
+        ? 20
+        : boardAfterAiMove.findIndex((cell) => cell === 0)
+      if (aiMoveIndex >= 0) {
+        boardAfterAiMove[aiMoveIndex] = AI_WHITE
+      }
+
+      const aiFlipped =
+        aiMoveIndex === 20 && boardAfterAiMove[28] === PLAYER_BLACK
+          ? [28]
+          : []
+      for (const index of aiFlipped) {
+        boardAfterAiMove[index] = AI_WHITE
+      }
+
+      setBoard(boardAfterAiMove)
+      setFlipped(aiFlipped)
+      setCurrentPlayer(PLAYER_BLACK)
+      setIsThinking(false)
+      setLegalMoves(
+        FOLLOWUP_LEGAL_MOVES.filter(
+          ({ row: moveRow, col: moveCol }) =>
+            boardAfterAiMove[moveRow * BOARD_WIDTH + moveCol] === 0,
+        ),
+      )
+      aiTimerRef.current = null
+    }, 480)
+  }
+
+  const handlePreviewResult = (): void => {
+    const finalBlack = countStones(board, PLAYER_BLACK)
+    const finalWhite = countStones(board, AI_WHITE)
+    setResult({
+      winner: finalBlack === finalWhite ? 0 : finalBlack > finalWhite ? PLAYER_BLACK : AI_WHITE,
+      black_count: finalBlack,
+      white_count: finalWhite,
+    })
+    setIsResultOpen(true)
+  }
+
+  const handleRestart = (): void => {
+    resetDemoGame()
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank" rel="noopener noreferrer">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank" rel="noopener noreferrer">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button type="button" onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
+    <div className="app">
+      <header className="app__header">
+        <p className="app__eyebrow">Reversi</p>
+        <h1>Reversi</h1>
+        <p className="app__lead">
+          Phase 4-4 component preview.
         </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+      </header>
+
+      {screen === 'level_select' ? (
+        <LevelSelect
+          selectedLevel={selectedLevel}
+          onLevelChange={setSelectedLevel}
+          onStart={handleStartGame}
+        />
+      ) : (
+        <main className="game-layout">
+          <Board
+            board={board}
+            legalMoves={legalMoves}
+            flipped={flipped}
+            isPlayerTurn={currentPlayer === PLAYER_BLACK && !isThinking}
+            onCellClick={handleCellClick}
+          />
+          <aside className="game-layout__panel">
+            <GameInfo
+              blackCount={blackCount}
+              whiteCount={whiteCount}
+              currentPlayer={currentPlayer}
+              isThinking={isThinking}
+              isGameOver={false}
+            />
+            <div className="game-controls">
+              <button
+                type="button"
+                className="game-controls__button"
+                onClick={handlePreviewResult}
+              >
+                Preview result
+              </button>
+              <button
+                type="button"
+                className="game-controls__button game-controls__button--subtle"
+                onClick={() => setScreen('level_select')}
+              >
+                Back to level select
+              </button>
+            </div>
+          </aside>
+        </main>
+      )}
+
+      <ResultModal
+        isOpen={isResultOpen}
+        winner={result.winner}
+        blackCount={result.black_count}
+        whiteCount={result.white_count}
+        onRestart={handleRestart}
+      />
+    </div>
   )
 }
 
