@@ -60,6 +60,8 @@ describe('LevelSelect', () => {
       />,
     )
 
+    expect(screen.getByRole('button', { name: /^Level 1$/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Level 6$/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Preparing...' })).toBeDisabled()
   })
 
