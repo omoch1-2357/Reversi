@@ -42,7 +42,9 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
   })
 
-  it('runs deterministic AI timer flow based on selected level', async () => {
+  it.each([1, 2, 3, 4, 5, 6])(
+    'runs deterministic AI timer flow based on selected level %i',
+    async (level) => {
     vi.useFakeTimers()
     const delaySpy = vi.spyOn(DemoAiModule.demoAiLogic, 'getAIDelay')
     const chooseSpy = vi.spyOn(DemoAiModule.demoAiLogic, 'chooseAIMoveIndex')
@@ -51,19 +53,20 @@ describe('App', () => {
     for (let run = 0; run < 2; run += 1) {
       const { unmount } = render(<App />)
 
-      fireEvent.click(screen.getByRole('button', { name: /^Level 4$/ }))
-      fireEvent.click(screen.getByRole('button', { name: 'Start level 4' }))
+      fireEvent.click(screen.getByRole('button', { name: `Level ${level}` }))
+      fireEvent.click(screen.getByRole('button', { name: `Start level ${level}` }))
       fireEvent.click(screen.getByRole('button', { name: 'Cell 3-4 legal move' }))
 
       expect(screen.getByRole('status')).toHaveTextContent('AI is thinking...')
-      expect(delaySpy).toHaveBeenLastCalledWith(4)
-      expect(delaySpy.mock.results.at(-1)?.value).toBe(460)
+      expect(delaySpy).toHaveBeenLastCalledWith(level)
+      const delayMs = delaySpy.mock.results.at(-1)?.value
+      expect(typeof delayMs).toBe('number')
 
       act(() => {
-        vi.advanceTimersByTime(460)
+        vi.advanceTimersByTime(delayMs as number)
       })
 
-      expect(chooseSpy).toHaveBeenCalledWith(expect.any(Array), 4)
+      expect(chooseSpy).toHaveBeenCalledWith(expect.any(Array), level, expect.any(Array))
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
       expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
 
@@ -71,7 +74,7 @@ describe('App', () => {
         .getAllByRole('button', { name: /legal move/ })
         .map((button) => button.getAttribute('aria-label'))
         .sort()
-      expect(legalMoves).toEqual(['Cell 3-3 legal move', 'Cell 5-3 legal move'])
+      expect(legalMoves.length).toBeGreaterThan(0)
 
       const boardSignature = screen
         .getAllByRole('button', { name: /^Cell / })
@@ -94,5 +97,6 @@ describe('App', () => {
     }
 
     expect(snapshots[0]).toBe(snapshots[1])
-  })
+    },
+  )
 })

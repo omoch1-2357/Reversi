@@ -148,7 +148,12 @@ function App() {
 
     aiTimerRef.current = window.setTimeout(() => {
       const boardAfterAiMove = boardAfterPlayerMove.slice()
-      const aiMoveIndex = demoAiLogic.chooseAIMoveIndex(boardAfterAiMove, selectedLevel)
+      const aiLegalMoves = demoAiLogic.getLegalMoveIndices(boardAfterAiMove, PLAYER_WHITE)
+      const aiMoveIndex = demoAiLogic.chooseAIMoveIndex(
+        boardAfterAiMove,
+        selectedLevel,
+        aiLegalMoves,
+      )
       if (aiMoveIndex >= 0) {
         boardAfterAiMove[aiMoveIndex] = PLAYER_WHITE
       }
