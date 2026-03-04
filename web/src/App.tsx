@@ -4,6 +4,7 @@ import Board from './components/Board'
 import GameInfo from './components/GameInfo'
 import LevelSelect from './components/LevelSelect'
 import ResultModal from './components/ResultModal'
+import { demoAiLogic } from './demoAi'
 import { PLAYER_BLACK, PLAYER_WHITE, type Player, type Winner } from './types/player'
 import workerUrl from './workers/wasm.worker.ts?worker&url'
 import type { Position } from './wasm'
@@ -41,14 +42,6 @@ const FOLLOWUP_LEGAL_MOVES: Position[] = [
   { row: 2, col: 4 },
   { row: 4, col: 2 },
 ]
-const AI_MOVE_PREFERENCES_BY_LEVEL: Record<number, number[]> = {
-  1: [20],
-  2: [20, 19, 26, 37, 44],
-  3: [20, 19, 26, 37, 44, 18, 21, 34],
-  4: [20, 26, 37, 19, 44, 34, 21],
-  5: [0, 7, 56, 63, 20, 19, 26, 37, 44],
-  6: [0, 7, 56, 63, 20, 26, 37, 19, 44, 34, 21],
-}
 
 const createInitialBoard = (): number[] => {
   const board = Array.from({ length: BOARD_CELLS }, () => 0)
@@ -63,18 +56,6 @@ const createInitialBoard = (): number[] => {
 
 const countStones = (board: number[], stone: number): number =>
   board.reduce((count, cell) => count + (cell === stone ? 1 : 0), 0)
-
-const getAIDelay = (level: number): number => 180 + level * 70
-
-const chooseAIMoveIndex = (board: number[], level: number): number => {
-  const preferences = AI_MOVE_PREFERENCES_BY_LEVEL[level] ?? AI_MOVE_PREFERENCES_BY_LEVEL[3]
-  for (const index of preferences) {
-    if (board[index] === 0) {
-      return index
-    }
-  }
-  return board.findIndex((cell) => cell === 0)
-}
 
 function App() {
   const [screen, setScreen] = useState<Screen>('level_select')
@@ -167,7 +148,7 @@ function App() {
 
     aiTimerRef.current = window.setTimeout(() => {
       const boardAfterAiMove = boardAfterPlayerMove.slice()
-      const aiMoveIndex = chooseAIMoveIndex(boardAfterAiMove, selectedLevel)
+      const aiMoveIndex = demoAiLogic.chooseAIMoveIndex(boardAfterAiMove, selectedLevel)
       if (aiMoveIndex >= 0) {
         boardAfterAiMove[aiMoveIndex] = PLAYER_WHITE
       }
@@ -191,10 +172,14 @@ function App() {
         ),
       )
       aiTimerRef.current = null
-    }, getAIDelay(selectedLevel))
+    }, demoAiLogic.getAIDelay(selectedLevel))
   }
 
   const handlePreviewResult = (): void => {
+    if (isThinking) {
+      return
+    }
+
     const finalBlack = countStones(board, PLAYER_BLACK)
     const finalWhite = countStones(board, PLAYER_WHITE)
     setResult({
@@ -251,6 +236,7 @@ function App() {
                 type="button"
                 className="game-controls__button"
                 onClick={handlePreviewResult}
+                disabled={isThinking}
               >
                 Preview result
               </button>
