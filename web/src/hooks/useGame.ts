@@ -48,6 +48,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
   const [isThinking, setIsThinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<GameResult | null>(null)
+  const handlerRef = useRef<(response: WorkerResponse) => void>(() => {})
 
   const settlePendingRequest = useCallback((response: WorkerResponse): void => {
     if (!isTerminalResponse(response.type)) {
@@ -110,6 +111,10 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
     [settlePendingRequest],
   )
 
+  useEffect(() => {
+    handlerRef.current = handleWorkerResponse
+  }, [handleWorkerResponse])
+
   const sendRequest = useCallback((request: WorkerRequest): Promise<void> => {
     const worker = workerRef.current
     if (worker === null) {
@@ -153,7 +158,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
         return
       }
 
-      handleWorkerResponse(response)
+      handlerRef.current(response)
     }
 
     worker.onerror = (): void => {
@@ -175,7 +180,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
       worker.terminate()
       workerRef.current = null
     }
-  }, [handleWorkerResponse])
+  }, [])
 
   const startGame = useCallback(
     async (level: number): Promise<void> => {
