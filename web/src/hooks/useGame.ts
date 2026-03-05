@@ -171,13 +171,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
         }
 
         if (response.requestId !== pendingRequest.requestId) {
-          const protocolError = new Error(
-            `Worker response requestId mismatch (expected ${pendingRequest.requestId}, got ${response.requestId})`,
-          )
-          pendingRequestRef.current = null
-          setIsThinking(false)
-          setError(protocolError.message)
-          pendingRequest.reject(protocolError)
+          // Ignore stale/mismatched responses; keep waiting for the active request.
           return
         }
       } else if (typeof response.requestId === 'string') {
