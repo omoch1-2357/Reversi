@@ -138,7 +138,17 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
 
     return new Promise((resolve, reject) => {
       pendingRequestRef.current = { requestId, resolve, reject }
-      worker.postMessage(requestWithId)
+      try {
+        worker.postMessage(requestWithId)
+      } catch (caughtError: unknown) {
+        pendingRequestRef.current = null
+        setIsThinking(false)
+        const postMessageError = caughtError instanceof Error
+          ? caughtError
+          : new Error(String(caughtError))
+        setError(postMessageError.message)
+        reject(postMessageError)
+      }
     })
   }, [])
 
@@ -150,11 +160,27 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
       const response = event.data
       const pendingRequest = pendingRequestRef.current
 
-      if (pendingRequest !== null && response.requestId !== pendingRequest.requestId) {
-        return
-      }
+      if (pendingRequest !== null) {
+        if (typeof response.requestId !== 'string') {
+          const protocolError = new Error('Worker response is missing requestId')
+          pendingRequestRef.current = null
+          setIsThinking(false)
+          setError(protocolError.message)
+          pendingRequest.reject(protocolError)
+          return
+        }
 
-      if (pendingRequest === null && typeof response.requestId === 'string') {
+        if (response.requestId !== pendingRequest.requestId) {
+          const protocolError = new Error(
+            `Worker response requestId mismatch (expected ${pendingRequest.requestId}, got ${response.requestId})`,
+          )
+          pendingRequestRef.current = null
+          setIsThinking(false)
+          setError(protocolError.message)
+          pendingRequest.reject(protocolError)
+          return
+        }
+      } else if (typeof response.requestId === 'string') {
         return
       }
 

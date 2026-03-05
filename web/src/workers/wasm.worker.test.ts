@@ -282,11 +282,18 @@ describe('wasm worker handler', () => {
       data: { requestId, type: 'place_stone', payload: { row: 2, col: 3 } },
     })
 
-    expect(posted[0]).toEqual({
-      requestId,
-      type: 'ai_step',
-      payload: { state: aiStep },
-    })
+    expect(posted).toEqual([
+      {
+        requestId,
+        type: 'ai_step',
+        payload: { state: aiStep },
+      },
+      {
+        requestId,
+        type: 'game_state',
+        payload: { state: aiStep, moves: [{ row: 5, col: 4 }] },
+      },
+    ])
   })
 
   it('echoes requestId for game_over responses in place_stone flow', async () => {
