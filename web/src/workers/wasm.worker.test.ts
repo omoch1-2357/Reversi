@@ -246,6 +246,28 @@ describe('wasm worker handler', () => {
     ])
   })
 
+  it('echoes requestId in worker responses', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const requestId = 'req-123'
+    const nextState = makeGameState({ black_count: 4, white_count: 1 })
+    wasmMock.initGame.mockReturnValueOnce(nextState)
+    wasmMock.getLegalMoves.mockReturnValueOnce([{ row: 2, col: 3 }])
+
+    await handler({ data: { requestId, type: 'init_game', payload: { level: 2 } } })
+
+    expect(posted).toEqual([
+      {
+        requestId,
+        type: 'game_state',
+        payload: {
+          state: nextState,
+          moves: [{ row: 2, col: 3 }],
+        },
+      },
+    ])
+  })
+
   it('handles place_stone and posts game_state when turn returns to player', async () => {
     const { scope, posted } = makeScope()
     const handler = createWorkerMessageHandler(scope)

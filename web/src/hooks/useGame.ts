@@ -19,6 +19,7 @@ export interface UseGameOptions {
 }
 
 interface PendingRequest {
+  requestId: string
   resolve: () => void
   reject: (reason?: unknown) => void
 }
@@ -39,6 +40,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
   const createWorkerRef = useRef(options.createWorker ?? createDefaultWorker)
   const workerRef = useRef<Worker | null>(null)
   const levelRef = useRef(DEFAULT_LEVEL)
+  const requestCounterRef = useRef(0)
   const pendingRequestRef = useRef<PendingRequest | null>(null)
 
   const [gameState, setGameState] = useState<GameState | null>(null)
@@ -54,6 +56,10 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
 
     const pendingRequest = pendingRequestRef.current
     if (pendingRequest === null) {
+      return
+    }
+
+    if (response.requestId !== pendingRequest.requestId) {
       return
     }
 
@@ -112,15 +118,22 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
       return Promise.reject(notReadyError)
     }
 
+    if (pendingRequestRef.current !== null) {
+      const concurrentRequestError = new Error('Another worker request is already in progress')
+      setError(concurrentRequestError.message)
+      return Promise.reject(concurrentRequestError)
+    }
+
+    requestCounterRef.current += 1
+    const requestId = `req-${requestCounterRef.current}`
+    const requestWithId: WorkerRequest = { ...request, requestId }
+
     setError(null)
     setIsThinking(true)
 
     return new Promise((resolve, reject) => {
-      if (pendingRequestRef.current !== null) {
-        pendingRequestRef.current.reject(new Error('Previous worker request was cancelled'))
-      }
-      pendingRequestRef.current = { resolve, reject }
-      worker.postMessage(request)
+      pendingRequestRef.current = { requestId, resolve, reject }
+      worker.postMessage(requestWithId)
     })
   }, [])
 
@@ -129,7 +142,18 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
     workerRef.current = worker
 
     worker.onmessage = (event: MessageEvent<WorkerResponse>): void => {
-      handleWorkerResponse(event.data)
+      const response = event.data
+      const pendingRequest = pendingRequestRef.current
+
+      if (pendingRequest !== null && response.requestId !== pendingRequest.requestId) {
+        return
+      }
+
+      if (pendingRequest === null && typeof response.requestId === 'string') {
+        return
+      }
+
+      handleWorkerResponse(response)
     }
 
     worker.onerror = (): void => {

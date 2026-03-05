@@ -10,22 +10,24 @@ import {
   type Position,
 } from '../wasm'
 
-type InitGameRequest = { type: 'init_game'; payload: { level: number } }
+type RequestWithId = { requestId?: string }
+
+type InitGameRequest = RequestWithId & { type: 'init_game'; payload: { level: number } }
 type PlaceStoneRequest = {
   type: 'place_stone'
   payload: { row: number; col: number }
-}
-type GetResultRequest = { type: 'get_result' }
+} & RequestWithId
+type GetResultRequest = RequestWithId & { type: 'get_result' }
 
 export type WorkerRequest = InitGameRequest | PlaceStoneRequest | GetResultRequest
-type IncomingWorkerRequest = WorkerRequest | { type: string; payload?: unknown }
+type IncomingWorkerRequest = WorkerRequest | { type: string; payload?: unknown; requestId?: unknown }
 
 export type WorkerResponse =
-  | { type: 'game_state'; payload: { state: GameState; moves: Position[] } }
-  | { type: 'ai_step'; payload: { state: GameState } }
-  | { type: 'game_over'; payload: { state: GameState; result: GameResult } }
-  | { type: 'result'; payload: GameResult }
-  | { type: 'error'; payload: string }
+  | { requestId?: string; type: 'game_state'; payload: { state: GameState; moves: Position[] } }
+  | { requestId?: string; type: 'ai_step'; payload: { state: GameState } }
+  | { requestId?: string; type: 'game_over'; payload: { state: GameState; result: GameResult } }
+  | { requestId?: string; type: 'result'; payload: GameResult }
+  | { requestId?: string; type: 'error'; payload: string }
 
 export interface WorkerMessageEvent {
   data: IncomingWorkerRequest
@@ -89,9 +91,17 @@ export const createWorkerMessageHandler = (
   scope: WorkerScopeLike,
   dependencies: WorkerDependencies = defaultDependencies,
 ): ((event: WorkerMessageEvent) => Promise<void>) => {
-  const emitError = (error: unknown): void => {
+  const postResponse = (message: WorkerResponse, requestId?: string): void => {
+    if (requestId === undefined) {
+      scope.postMessage(message)
+      return
+    }
+    scope.postMessage({ ...message, requestId })
+  }
+
+  const emitError = (error: unknown, requestId?: string): void => {
     const message = error instanceof Error ? error.message : String(error)
-    scope.postMessage({ type: 'error', payload: message })
+    postResponse({ type: 'error', payload: message }, requestId)
   }
 
   return async (event: WorkerMessageEvent): Promise<void> => {
@@ -107,26 +117,32 @@ export const createWorkerMessageHandler = (
     }
 
     const request = maybeRequest as IncomingWorkerRequest
+    const rawRequestId = (request as { requestId?: unknown }).requestId
+    if (rawRequestId !== undefined && typeof rawRequestId !== 'string') {
+      scope.postMessage({ type: 'error', payload: INVALID_MESSAGE_SHAPE })
+      return
+    }
+    const requestId = rawRequestId
 
     try {
       switch (request.type) {
         case 'init_game': {
           const payload = (request as { payload?: unknown }).payload
           if (!isValidInitPayload(payload)) {
-            scope.postMessage({ type: 'error', payload: INVALID_MESSAGE_SHAPE })
+            postResponse({ type: 'error', payload: INVALID_MESSAGE_SHAPE }, requestId)
             return
           }
 
           await dependencies.ensureWasmModuleLoaded()
           const state = dependencies.initGame(payload.level)
           const moves = dependencies.getLegalMoves()
-          scope.postMessage({ type: 'game_state', payload: { state, moves } })
+          postResponse({ type: 'game_state', payload: { state, moves } }, requestId)
           return
         }
         case 'place_stone': {
           const payload = (request as { payload?: unknown }).payload
           if (!isValidPlaceStonePayload(payload)) {
-            scope.postMessage({ type: 'error', payload: INVALID_MESSAGE_SHAPE })
+            postResponse({ type: 'error', payload: INVALID_MESSAGE_SHAPE }, requestId)
             return
           }
 
@@ -138,50 +154,50 @@ export const createWorkerMessageHandler = (
 
           if (state.is_game_over) {
             const result = dependencies.getResult()
-            scope.postMessage({ type: 'game_over', payload: { state, result } })
+            postResponse({ type: 'game_over', payload: { state, result } }, requestId)
             return
           }
 
           let aiStepCount = 0
           while (state.current_player === 2 && !state.is_game_over) {
             if (aiStepCount >= MAX_AI_STEPS) {
-              scope.postMessage({
+              postResponse({
                 type: 'error',
                 payload: `AI move loop exceeded safety cap (${MAX_AI_STEPS})`,
-              })
+              }, requestId)
               return
             }
             aiStepCount += 1
             state = dependencies.aiMove()
-            scope.postMessage({ type: 'ai_step', payload: { state } })
+            postResponse({ type: 'ai_step', payload: { state } }, requestId)
           }
 
           if (state.is_game_over) {
             const result = dependencies.getResult()
-            scope.postMessage({ type: 'game_over', payload: { state, result } })
+            postResponse({ type: 'game_over', payload: { state, result } }, requestId)
             return
           }
 
           const moves = dependencies.getLegalMoves()
-          scope.postMessage({ type: 'game_state', payload: { state, moves } })
+          postResponse({ type: 'game_state', payload: { state, moves } }, requestId)
           return
         }
         case 'get_result': {
           await dependencies.ensureWasmModuleLoaded()
           const result = dependencies.getResult()
-          scope.postMessage({ type: 'result', payload: result })
+          postResponse({ type: 'result', payload: result }, requestId)
           return
         }
         default: {
-          scope.postMessage({
+          postResponse({
             type: 'error',
             payload: `Unknown worker message type: ${request.type}`,
-          })
+          }, requestId)
           return
         }
       }
     } catch (error: unknown) {
-      emitError(error)
+      emitError(error, requestId)
     }
   }
 }

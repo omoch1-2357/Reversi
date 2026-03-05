@@ -74,11 +74,20 @@ describe('useGame', () => {
       startPromise = result.current.startGame(3)
     })
 
-    expect(worker.postedMessages).toEqual([{ type: 'init_game', payload: { level: 3 } }])
+    expect(worker.postedMessages).toHaveLength(1)
+    expect(worker.postedMessages[0]).toEqual(
+      expect.objectContaining({ type: 'init_game', payload: { level: 3 } }),
+    )
+    const requestId = worker.postedMessages[0].requestId
+    expect(typeof requestId).toBe('string')
     expect(result.current.isThinking).toBe(true)
 
     act(() => {
-      worker.emitMessage({ type: 'game_state', payload: { state: openingState, moves: openingMoves } })
+      worker.emitMessage({
+        requestId,
+        type: 'game_state',
+        payload: { state: openingState, moves: openingMoves },
+      })
     })
 
     await expect(startPromise).resolves.toBeUndefined()
@@ -105,8 +114,14 @@ describe('useGame', () => {
     act(() => {
       initPromise = result.current.startGame(2)
     })
+    const initRequestId = worker.postedMessages[0].requestId
+    expect(typeof initRequestId).toBe('string')
     act(() => {
-      worker.emitMessage({ type: 'game_state', payload: { state: initialState, moves: [] } })
+      worker.emitMessage({
+        requestId: initRequestId,
+        type: 'game_state',
+        payload: { state: initialState, moves: [] },
+      })
     })
     await expect(initPromise).resolves.toBeUndefined()
 
@@ -114,18 +129,26 @@ describe('useGame', () => {
     act(() => {
       placePromise = result.current.placeStone(2, 3)
     })
-    expect(worker.postedMessages.at(-1)).toEqual({ type: 'place_stone', payload: { row: 2, col: 3 } })
+    expect(worker.postedMessages.at(-1)).toEqual(
+      expect.objectContaining({ type: 'place_stone', payload: { row: 2, col: 3 } }),
+    )
+    const placeRequestId = worker.postedMessages.at(-1)?.requestId
+    expect(typeof placeRequestId).toBe('string')
     expect(result.current.isThinking).toBe(true)
 
     act(() => {
-      worker.emitMessage({ type: 'ai_step', payload: { state: afterAiStep } })
+      worker.emitMessage({ requestId: placeRequestId, type: 'ai_step', payload: { state: afterAiStep } })
     })
     expect(result.current.gameState).toEqual(afterAiStep)
     expect(result.current.legalMoves).toEqual([])
     expect(result.current.isThinking).toBe(true)
 
     act(() => {
-      worker.emitMessage({ type: 'game_state', payload: { state: afterTurn, moves: nextMoves } })
+      worker.emitMessage({
+        requestId: placeRequestId,
+        type: 'game_state',
+        payload: { state: afterTurn, moves: nextMoves },
+      })
     })
 
     await expect(placePromise).resolves.toBeUndefined()
@@ -148,8 +171,11 @@ describe('useGame', () => {
     act(() => {
       startPromise = result.current.startGame(1)
     })
+    const requestId = worker.postedMessages[0].requestId
+    expect(typeof requestId).toBe('string')
     act(() => {
       worker.emitMessage({
+        requestId,
         type: 'game_over',
         payload: { state: finishedState, result: finishedResult },
       })
@@ -171,12 +197,56 @@ describe('useGame', () => {
     act(() => {
       startPromise = result.current.startGame(4)
     })
+    const requestId = worker.postedMessages[0].requestId
+    expect(typeof requestId).toBe('string')
     act(() => {
-      worker.emitMessage({ type: 'error', payload: 'WASM init failed' })
+      worker.emitMessage({ requestId, type: 'error', payload: 'WASM init failed' })
     })
 
     await expect(startPromise).rejects.toThrow('WASM init failed')
     expect(result.current.error).toBe('WASM init failed')
     expect(result.current.isThinking).toBe(false)
+  })
+
+  it('rejects concurrent requests and keeps first request ownership', async () => {
+    const worker = new MockWorker()
+    const { result } = renderHook(() =>
+      useGame({ createWorker: () => worker as unknown as Worker }),
+    )
+    const firstState = makeState({ black_count: 5, white_count: 1 })
+    const firstMoves = makeMoves([{ row: 2, col: 4 }])
+
+    let firstPromise!: Promise<void>
+    act(() => {
+      firstPromise = result.current.startGame(5)
+    })
+    expect(worker.postedMessages).toHaveLength(1)
+    const firstRequestId = worker.postedMessages[0].requestId
+    expect(typeof firstRequestId).toBe('string')
+
+    let secondPromise!: Promise<void>
+    act(() => {
+      secondPromise = result.current.placeStone(2, 3)
+    })
+    await expect(secondPromise).rejects.toThrow('Another worker request is already in progress')
+    expect(worker.postedMessages).toHaveLength(1)
+    expect(result.current.isThinking).toBe(true)
+    expect(result.current.error).toBe('Another worker request is already in progress')
+
+    act(() => {
+      worker.emitMessage({
+        requestId: firstRequestId,
+        type: 'game_state',
+        payload: { state: firstState, moves: firstMoves },
+      })
+    })
+
+    await expect(firstPromise).resolves.toBeUndefined()
+    await waitFor(() => {
+      expect(result.current.gameState).toEqual(firstState)
+      expect(result.current.legalMoves).toEqual(firstMoves)
+      expect(result.current.isThinking).toBe(false)
+      expect(result.current.error).toBeNull()
+    })
   })
 })
