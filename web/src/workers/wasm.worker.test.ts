@@ -246,6 +246,99 @@ describe('wasm worker handler', () => {
     ])
   })
 
+  it('echoes requestId in worker responses', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const requestId = 'req-123'
+    const nextState = makeGameState({ black_count: 4, white_count: 1 })
+    wasmMock.initGame.mockReturnValueOnce(nextState)
+    wasmMock.getLegalMoves.mockReturnValueOnce([{ row: 2, col: 3 }])
+
+    await handler({ data: { requestId, type: 'init_game', payload: { level: 2 } } })
+
+    expect(posted).toEqual([
+      {
+        requestId,
+        type: 'game_state',
+        payload: {
+          state: nextState,
+          moves: [{ row: 2, col: 3 }],
+        },
+      },
+    ])
+  })
+
+  it('echoes requestId for ai_step responses in place_stone flow', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const requestId = 'req-ai-step'
+    const afterPlayerMove = makeGameState({ current_player: 2 })
+    const aiStep = makeGameState({ current_player: 1, flipped: [12] })
+    wasmMock.placeStone.mockReturnValueOnce(afterPlayerMove)
+    wasmMock.aiMove.mockReturnValueOnce(aiStep)
+    wasmMock.getLegalMoves.mockReturnValueOnce([{ row: 5, col: 4 }])
+
+    await handler({
+      data: { requestId, type: 'place_stone', payload: { row: 2, col: 3 } },
+    })
+
+    expect(posted).toEqual([
+      {
+        requestId,
+        type: 'ai_step',
+        payload: { state: aiStep },
+      },
+      {
+        requestId,
+        type: 'game_state',
+        payload: { state: aiStep, moves: [{ row: 5, col: 4 }] },
+      },
+    ])
+  })
+
+  it('echoes requestId for game_over responses in place_stone flow', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const requestId = 'req-game-over'
+    const finalState = makeGameState({ is_game_over: true })
+    const result = makeResult()
+    wasmMock.placeStone.mockReturnValueOnce(finalState)
+    wasmMock.getResult.mockReturnValueOnce(result)
+
+    await handler({
+      data: { requestId, type: 'place_stone', payload: { row: 7, col: 7 } },
+    })
+
+    expect(posted).toEqual([
+      {
+        requestId,
+        type: 'game_over',
+        payload: { state: finalState, result },
+      },
+    ])
+  })
+
+  it('echoes requestId for error responses when wasm throws', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const requestId = 'req-error'
+    wasmMock.placeStone.mockImplementationOnce(() => {
+      throw new Error('place_stone failed')
+    })
+
+    await handler({
+      data: { requestId, type: 'place_stone', payload: { row: 1, col: 1 } },
+    })
+
+    expect(posted).toEqual([
+      {
+        requestId,
+        type: 'error',
+        payload: 'place_stone failed',
+      },
+    ])
+  })
+
   it('handles place_stone and posts game_state when turn returns to player', async () => {
     const { scope, posted } = makeScope()
     const handler = createWorkerMessageHandler(scope)

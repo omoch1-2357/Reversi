@@ -157,7 +157,7 @@
 
 ### 4-5. 状態管理フック
 
-- [ ] `useGame.ts` — Worker ライフサイクル管理 + React State 連携
+- [x] `useGame.ts` — Worker ライフサイクル管理 + React State 連携
 
 ### 4-6. レスポンシブ対応
 
