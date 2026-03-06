@@ -31,28 +31,33 @@ function Board({
 
   return (
     <section className={styles['board-shell']}>
-      <h2 className={styles['board-shell__title']}>Board</h2>
-      <div className={styles.board} role="grid" aria-label="Reversi board">
-        {Array.from({ length: BOARD_CELLS }, (_, index) => {
-          const row = Math.floor(index / BOARD_SIZE)
-          const col = index % BOARD_SIZE
-          const isLegal = isPlayerTurn && legalSet.has(index)
-          return (
-            <Cell
-              key={index}
-              value={safeBoard[index]}
-              row={row}
-              col={col}
-              isLegal={isLegal}
-              isFlipped={flippedSet.has(index)}
-              onClick={() => {
-                if (isLegal) {
-                  onCellClick(row, col)
-                }
-              }}
-            />
-          )
-        })}
+      <div className={styles['board-shell__header']}>
+        <h2 className={styles['board-shell__title']}>Board</h2>
+        <p className={styles['board-shell__hint']}>Tap the highlighted cells to place a stone.</p>
+      </div>
+      <div className={styles['board-shell__viewport']}>
+        <div className={styles.board} role="grid" aria-label="Reversi board">
+          {Array.from({ length: BOARD_CELLS }, (_, index) => {
+            const row = Math.floor(index / BOARD_SIZE)
+            const col = index % BOARD_SIZE
+            const isLegal = isPlayerTurn && legalSet.has(index)
+            return (
+              <Cell
+                key={index}
+                value={safeBoard[index]}
+                row={row}
+                col={col}
+                isLegal={isLegal}
+                isFlipped={flippedSet.has(index)}
+                onClick={() => {
+                  if (isLegal) {
+                    onCellClick(row, col)
+                  }
+                }}
+              />
+            )
+          })}
+        </div>
       </div>
     </section>
   )

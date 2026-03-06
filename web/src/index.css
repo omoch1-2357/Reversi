@@ -1,10 +1,19 @@
 :root {
-  --font-display: "Segoe UI", sans-serif;
-  --font-body: "Segoe UI", sans-serif;
+  --font-display: "Segoe UI", "Yu Gothic UI", sans-serif;
+  --font-body: "Segoe UI", "Yu Gothic UI", sans-serif;
   --text-main: #111827;
   --text-muted: #4b5563;
   --panel-bg: #ffffff;
+  --panel-alt: #f9fafb;
   --border-strong: #d1d5db;
+  --border-soft: #e5e7eb;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #dbeafe;
+  --board-green: #2f855a;
+  --board-green-bright: #38a169;
+  --shadow-lg: 0 10px 24px rgb(15 23 42 / 8%);
+  --shadow-md: 0 4px 12px rgb(15 23 42 / 6%);
 
   font-family: var(--font-body);
   line-height: 1.5;
@@ -26,15 +35,19 @@ body {
   min-width: 320px;
   min-height: 100vh;
   color: var(--text-main);
-  background: #f5f5f5;
+  background: #f3f4f6;
 }
 
 #root {
   min-height: 100vh;
-  padding: 16px;
+  padding: clamp(14px, 3vw, 28px);
+}
+
+button {
+  font: inherit;
 }
 
 button:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

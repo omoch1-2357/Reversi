@@ -1,18 +1,21 @@
 .level-select {
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: #fff;
+  background: var(--panel-bg);
 }
 
 .level-select__title {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 22px;
+  line-height: 1.2;
 }
 
 .level-select__description {
   margin: 4px 0 0;
+  max-width: 32rem;
   color: var(--text-muted);
 }
 
@@ -25,29 +28,31 @@
 
 .level-select__option {
   min-height: 44px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
-  color: #111827;
-  font-family: var(--font-body);
+  color: var(--text-main);
   font-size: 16px;
   font-weight: 500;
-  background: #fff;
+  background: #ffffff;
   cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.level-select__option:hover:not(:disabled) {
+  background: #f9fafb;
 }
 
 .level-select__option--selected {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .level-select__option:focus-visible {
-  outline: 2px solid #1d4ed8;
   outline-offset: 2px;
 }
 
 .level-select__option--selected:focus-visible {
-  border-color: #1d4ed8;
-  box-shadow: 0 0 0 3px rgb(29 78 216 / 20%);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 20%);
 }
 
 .level-select__option:disabled {
@@ -59,14 +64,18 @@
   margin-top: 12px;
   width: 100%;
   min-height: 44px;
-  border: 1px solid #2563eb;
+  border: 1px solid var(--accent-strong);
   border-radius: 6px;
-  font-family: var(--font-body);
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
-  background: #2563eb;
+  color: #ffffff;
+  background: var(--accent);
   cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.level-select__start:hover:not(:disabled) {
+  background: var(--accent-strong);
 }
 
 .level-select__start:disabled {
@@ -75,8 +84,6 @@
 }
 
 .level-select__start:focus-visible {
-  outline: 2px solid #111827;
-  outline-offset: 2px;
   box-shadow: 0 0 0 3px rgb(37 99 235 / 25%);
 }
 
@@ -86,8 +93,18 @@
   font-size: 14px;
 }
 
-@media (max-width: 540px) {
+@media (max-width: 767px) {
+  .level-select {
+    padding: 16px;
+  }
+
   .level-select__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 479px) {
+  .level-select__grid {
+    grid-template-columns: 1fr;
   }
 }

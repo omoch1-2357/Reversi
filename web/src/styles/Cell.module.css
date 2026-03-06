@@ -1,7 +1,9 @@
 .cell {
   position: relative;
+  min-width: 44px;
+  min-height: 44px;
   border: 1px solid #111827;
-  background: #2f855a;
+  background: var(--board-green);
   cursor: not-allowed;
   padding: 0;
 }
@@ -23,6 +25,10 @@
   opacity: 1;
 }
 
+.cell--legal:hover:not(:disabled) {
+  background: var(--board-green-bright);
+}
+
 .cell:not(.cell--legal)::before {
   opacity: 0;
 }
@@ -40,4 +46,13 @@
 .cell--white .stone {
   background: #ffffff;
   border: 1px solid #9ca3af;
+}
+
+.cell--flipped .stone {
+  outline: 2px solid #f59e0b;
+  outline-offset: -2px;
+}
+
+.cell:focus-visible {
+  z-index: 1;
 }

@@ -29,13 +29,16 @@ function GameInfo({
 }: GameInfoProps) {
   return (
     <section className={styles['game-info']} aria-label="Game status">
-      <h2 className={styles['game-info__title']}>Game Info</h2>
+      <div className={styles['game-info__header']}>
+        <p className={styles['game-info__eyebrow']}>Match status</p>
+        <h2 className={styles['game-info__title']}>Game Info</h2>
+      </div>
       <div className={styles['game-info__counts']}>
-        <p>
+        <p className={styles['game-info__count-card']}>
           <span className={styles['game-info__label']}>Black</span>
           <strong>{blackCount}</strong>
         </p>
-        <p>
+        <p className={styles['game-info__count-card']}>
           <span className={styles['game-info__label']}>White</span>
           <strong>{whiteCount}</strong>
         </p>
