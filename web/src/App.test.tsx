@@ -52,6 +52,7 @@ const makeState = (overrides: Partial<GameState> = {}): GameState => ({
   ...overrides,
 })
 
+/** Type-safe helper for constructing Position arrays in tests */
 const makeMoves = (moves: Position[]): Position[] => moves
 
 const makeResult = (overrides: Partial<GameResult> = {}): GameResult => ({
