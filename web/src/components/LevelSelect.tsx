@@ -3,6 +3,7 @@ import styles from '../styles/LevelSelect.module.css'
 interface LevelSelectProps {
   selectedLevel: number
   disabled?: boolean
+  startDisabled?: boolean
   isLoading?: boolean
   error?: string | null
   onLevelChange: (level: number) => void
@@ -14,12 +15,14 @@ const LEVELS = [1, 2, 3, 4, 5, 6] as const
 function LevelSelect({
   selectedLevel,
   disabled = false,
+  startDisabled = false,
   isLoading = false,
   error = null,
   onLevelChange,
   onStart,
 }: LevelSelectProps) {
-  const isActionDisabled = disabled || isLoading
+  const areOptionsDisabled = disabled || isLoading
+  const isStartActionDisabled = areOptionsDisabled || startDisabled
 
   return (
     <section className={styles['level-select']} aria-label="Level selection">
@@ -42,7 +45,7 @@ function LevelSelect({
                 .filter(Boolean)
                 .join(' ')}
               onClick={() => onLevelChange(level)}
-              disabled={isActionDisabled}
+              disabled={areOptionsDisabled}
             >
               Level {level}
             </button>
@@ -53,7 +56,7 @@ function LevelSelect({
         type="button"
         className={styles['level-select__start']}
         onClick={onStart}
-        disabled={isActionDisabled}
+        disabled={isStartActionDisabled}
       >
         {isLoading ? 'Preparing...' : `Start level ${selectedLevel}`}
       </button>

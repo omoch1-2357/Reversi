@@ -6,6 +6,7 @@ interface ResultModalProps {
   winner: Winner
   blackCount: number
   whiteCount: number
+  onClose: () => void
   onRestart: () => void
 }
 
@@ -24,6 +25,7 @@ function ResultModal({
   winner,
   blackCount,
   whiteCount,
+  onClose,
   onRestart,
 }: ResultModalProps) {
   if (!isOpen) {
@@ -38,9 +40,14 @@ function ResultModal({
         <p className={styles['modal__score']}>
           Black {blackCount} : White {whiteCount}
         </p>
-        <button type="button" className={styles['modal__restart']} onClick={onRestart}>
-          Restart
-        </button>
+        <div className={styles['modal__actions']}>
+          <button type="button" className={styles['modal__restart']} onClick={onRestart}>
+            Restart
+          </button>
+          <button type="button" className={styles['modal__close']} onClick={onClose}>
+            Close
+          </button>
+        </div>
       </section>
     </div>
   )

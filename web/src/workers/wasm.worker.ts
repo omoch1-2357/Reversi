@@ -160,6 +160,10 @@ export const createWorkerMessageHandler = (
 
           let aiStepCount = 0
           while (state.current_player === 2 && !state.is_game_over) {
+            if (aiStepCount === 0) {
+              // Surface the player's move immediately before the AI starts thinking.
+              postResponse({ type: 'ai_step', payload: { state } }, requestId)
+            }
             if (aiStepCount >= MAX_AI_STEPS) {
               postResponse({
                 type: 'error',

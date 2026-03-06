@@ -6,6 +6,7 @@ interface GameInfoProps {
   whiteCount: number
   currentPlayer: Player
   isThinking: boolean
+  isPass: boolean
   isGameOver: boolean
 }
 
@@ -25,8 +26,16 @@ function GameInfo({
   whiteCount,
   currentPlayer,
   isThinking,
+  isPass,
   isGameOver,
 }: GameInfoProps) {
+  const passMessage =
+    !isPass || isGameOver
+      ? null
+      : currentPlayer === PLAYER_BLACK
+        ? 'AI passed. Your turn continues.'
+        : 'You have no legal moves. AI continues.'
+
   return (
     <section className={styles['game-info']} aria-label="Game status">
       <div className={styles['game-info__header']}>
@@ -44,6 +53,7 @@ function GameInfo({
         </p>
       </div>
       <p className={styles['game-info__turn']}>{getTurnLabel(currentPlayer, isGameOver)}</p>
+      {passMessage ? <p className={styles['game-info__thinking']}>{passMessage}</p> : null}
       {isThinking ? (
         <p className={styles['game-info__thinking']} role="status">
           <span className={styles['game-info__spinner']} aria-hidden="true" />

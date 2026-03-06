@@ -35,8 +35,13 @@
   font-size: 16px;
 }
 
-.modal__restart {
+.modal__actions {
+  display: grid;
+  gap: 10px;
   margin-top: 12px;
+}
+
+.modal__restart {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--border-strong);
@@ -51,4 +56,21 @@
 
 .modal__restart:hover {
   background: #f9fafb;
+}
+
+.modal__close {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+  background: var(--panel-alt);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.modal__close:hover {
+  background: #f3f4f6;
 }
