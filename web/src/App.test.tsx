@@ -1,116 +1,319 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
-import * as DemoAiModule from './demoAi'
+import type { GameResult, GameState, Position } from './wasm'
+import type { WorkerRequest, WorkerResponse } from './workers/wasm.worker'
+
+class MockWorker {
+  static instances: MockWorker[] = []
+
+  public onmessage: ((event: MessageEvent<WorkerResponse>) => void) | null = null
+  public onerror: ((event: ErrorEvent) => void) | null = null
+  public postedMessages: WorkerRequest[] = []
+
+  constructor() {
+    MockWorker.instances.push(this)
+  }
+
+  postMessage(message: WorkerRequest): void {
+    this.postedMessages.push(message)
+  }
+
+  terminate(): void {}
+
+  emitMessage(message: WorkerResponse): void {
+    this.onmessage?.({ data: message } as MessageEvent<WorkerResponse>)
+  }
+
+  static latest(): MockWorker {
+    const instance = MockWorker.instances.at(-1)
+    if (!instance) {
+      throw new Error('MockWorker instance was not created')
+    }
+    return instance
+  }
+
+  static reset(): void {
+    MockWorker.instances = []
+  }
+}
+
+const originalWorker = globalThis.Worker
+
+const makeState = (overrides: Partial<GameState> = {}): GameState => ({
+  board: Array.from({ length: 64 }, () => 0),
+  current_player: 1,
+  black_count: 2,
+  white_count: 2,
+  is_game_over: false,
+  is_pass: false,
+  flipped: [],
+  ...overrides,
+})
+
+const makeMoves = (moves: Position[]): Position[] => moves
+
+const makeResult = (overrides: Partial<GameResult> = {}): GameResult => ({
+  winner: 1,
+  black_count: 33,
+  white_count: 31,
+  ...overrides,
+})
+
+beforeEach(() => {
+  MockWorker.reset()
+  Object.defineProperty(globalThis, 'Worker', {
+    configurable: true,
+    writable: true,
+    value: MockWorker,
+  })
+})
 
 afterEach(() => {
   cleanup()
-  vi.restoreAllMocks()
-  vi.useRealTimers()
+  if (originalWorker === undefined) {
+    delete (globalThis as { Worker?: typeof Worker }).Worker
+  } else {
+    Object.defineProperty(globalThis, 'Worker', {
+      configurable: true,
+      writable: true,
+      value: originalWorker,
+    })
+  }
 })
 
 describe('App', () => {
-  const openingCells = [
-    'Cell 3-4 legal move',
-    'Cell 4-3 legal move',
-    'Cell 5-6 legal move',
-    'Cell 6-5 legal move',
-  ] as const
-
-  it('starts from level select and transitions to game preview', async () => {
+  it('starts from level select and transitions to the worker-backed game screen', async () => {
     const user = userEvent.setup()
-
     render(<App />)
 
-    expect(
-      screen.getByRole('heading', { name: 'Select difficulty' }),
-    ).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /^Level 4$/ }))
+    await user.click(screen.getByRole('button', { name: 'Level 4' }))
     await user.click(screen.getByRole('button', { name: 'Start level 4' }))
 
-    expect(screen.getByRole('grid', { name: 'Reversi board' })).toBeInTheDocument()
-    expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Preparing...' })).toBeDisabled()
+
+    const worker = MockWorker.latest()
+    const requestId = worker.postedMessages[0].requestId
+    expect(typeof requestId).toBe('string')
+
+    act(() => {
+      worker.emitMessage({
+        requestId,
+        type: 'game_state',
+        payload: {
+          state: makeState(),
+          moves: makeMoves([
+            { row: 2, col: 3 },
+            { row: 3, col: 2 },
+          ]),
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('grid', { name: 'Reversi board' })).toBeInTheDocument()
+      expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 4' })).toBeInTheDocument()
+    })
   })
 
-  it('opens and closes the result modal via restart', async () => {
+  it('shows init_game failure UI, disables the start button, and retries successfully', async () => {
     const user = userEvent.setup()
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'Start level 3' }))
-    const [previewButton] = screen.getAllByRole('button', { name: 'Preview result' })
-    await user.click(previewButton)
 
-    expect(screen.getByRole('dialog', { name: 'Game result' })).toBeInTheDocument()
+    const worker = MockWorker.latest()
+    const firstRequestId = worker.postedMessages[0].requestId
+    expect(typeof firstRequestId).toBe('string')
 
-    await user.click(screen.getByRole('button', { name: 'Restart' }))
+    act(() => {
+      worker.emitMessage({
+        requestId: firstRequestId,
+        type: 'error',
+        payload: 'CRC32 mismatch',
+      })
+    })
 
-    expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'モデルデータの読み込みに失敗しました。再試行してください。',
+      )
+    })
+    expect(screen.getByRole('button', { name: 'Start level 3' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry initialization' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry initialization' }))
+
+    const secondRequestId = worker.postedMessages[1].requestId
+    expect(typeof secondRequestId).toBe('string')
+
+    act(() => {
+      worker.emitMessage({
+        requestId: secondRequestId,
+        type: 'game_state',
+        payload: {
+          state: makeState(),
+          moves: makeMoves([{ row: 2, col: 3 }]),
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('grid', { name: 'Reversi board' })).toBeInTheDocument()
+    })
   })
 
-  describe.each([1, 2, 3, 4, 5, 6])('selected level %i', (level) => {
-    it.each(openingCells)(
-      'runs deterministic AI timer flow for opening %s',
-      async (openingCell) => {
-        vi.useFakeTimers()
-        const delaySpy = vi.spyOn(DemoAiModule.demoAiLogic, 'getAIDelay')
-        const chooseSpy = vi.spyOn(DemoAiModule.demoAiLogic, 'chooseAIMoveIndex')
-        const snapshots: string[] = []
+  it('can close the result modal without resetting and restart from outside the modal', async () => {
+    const user = userEvent.setup()
+    render(<App />)
 
-        for (let run = 0; run < 2; run += 1) {
-          const { unmount } = render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Start level 3' }))
 
-          fireEvent.click(screen.getByRole('button', { name: `Level ${level}` }))
-          fireEvent.click(screen.getByRole('button', { name: `Start level ${level}` }))
-          fireEvent.click(screen.getByRole('button', { name: openingCell }))
+    const worker = MockWorker.latest()
+    const initRequestId = worker.postedMessages[0].requestId
+    expect(typeof initRequestId).toBe('string')
 
-          expect(screen.getByRole('status')).toHaveTextContent('AI is thinking...')
-          expect(delaySpy).toHaveBeenLastCalledWith(level)
-          const delayMs = delaySpy.mock.results.at(-1)?.value
-          expect(typeof delayMs).toBe('number')
+    act(() => {
+      worker.emitMessage({
+        requestId: initRequestId,
+        type: 'game_state',
+        payload: {
+          state: makeState(),
+          moves: makeMoves([{ row: 2, col: 3 }]),
+        },
+      })
+    })
 
-          act(() => {
-            vi.advanceTimersByTime(delayMs as number)
-          })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Cell 3-4 legal move' })).toBeInTheDocument()
+    })
 
-          expect(chooseSpy).toHaveBeenCalledWith(expect.any(Array), level, expect.any(Array))
-          expect(screen.queryByRole('status')).not.toBeInTheDocument()
-          expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cell 3-4 legal move' }))
 
-          const legalMoves = screen
-            .getAllByRole('button', { name: /legal move/ })
-            .map((button) => button.getAttribute('aria-label'))
-            .sort()
-          expect(legalMoves.length).toBeGreaterThan(0)
+    const placeRequestId = worker.postedMessages[1].requestId
+    expect(typeof placeRequestId).toBe('string')
 
-          fireEvent.click(screen.getByRole('button', { name: 'Preview result' }))
-          expect(screen.getByRole('dialog', { name: 'Game result' })).toBeInTheDocument()
-          fireEvent.click(screen.getByRole('button', { name: 'Restart' }))
-          expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
+    act(() => {
+      worker.emitMessage({
+        requestId: placeRequestId,
+        type: 'ai_step',
+        payload: {
+          state: makeState({
+            current_player: 2,
+            black_count: 4,
+            white_count: 3,
+            flipped: [28],
+          }),
+        },
+      })
+    })
 
-          const boardSignature = screen
-            .getAllByRole('button', { name: /^Cell / })
-            .map((button) => {
-              const className = String(button.className)
-              if (className.includes('cell--black')) {
-                return 'B'
-              }
-              if (className.includes('cell--white')) {
-                return 'W'
-              }
-              return '_'
-            })
-            .join('')
-          const flippedCount = document.querySelectorAll('button[class*="cell--flipped"]').length
-          snapshots.push(`${boardSignature}|${legalMoves.join(',')}|flipped:${flippedCount}`)
+    expect(screen.getByRole('status')).toHaveTextContent('AI is thinking...')
 
-          unmount()
-          cleanup()
-        }
+    act(() => {
+      worker.emitMessage({
+        requestId: placeRequestId,
+        type: 'game_over',
+        payload: {
+          state: makeState({
+            current_player: 1,
+            black_count: 20,
+            white_count: 44,
+            is_game_over: true,
+          }),
+          result: makeResult({
+            winner: 2,
+            black_count: 20,
+            white_count: 44,
+          }),
+        },
+      })
+    })
 
-        expect(snapshots[0]).toBe(snapshots[1])
-      },
-    )
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Game result' })).toBeInTheDocument()
+      expect(
+        screen.getByRole('dialog', { name: 'Game result' }),
+      ).toHaveTextContent('White wins')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Show result popup' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 3' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Restart level 3' }))
+
+    const restartRequestId = worker.postedMessages[2].requestId
+    expect(typeof restartRequestId).toBe('string')
+
+    act(() => {
+      worker.emitMessage({
+        requestId: restartRequestId,
+        type: 'game_state',
+        payload: {
+          state: makeState(),
+          moves: makeMoves([{ row: 2, col: 3 }]),
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 3' })).toBeInTheDocument()
+    })
+  })
+
+  it('shows pass guidance when the turn returns to the player without an AI move', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Start level 3' }))
+
+    const worker = MockWorker.latest()
+    const initRequestId = worker.postedMessages[0].requestId
+    expect(typeof initRequestId).toBe('string')
+
+    act(() => {
+      worker.emitMessage({
+        requestId: initRequestId,
+        type: 'game_state',
+        payload: {
+          state: makeState(),
+          moves: makeMoves([{ row: 2, col: 3 }]),
+        },
+      })
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Cell 3-4 legal move' }))
+
+    const placeRequestId = worker.postedMessages[1].requestId
+    expect(typeof placeRequestId).toBe('string')
+
+    act(() => {
+      worker.emitMessage({
+        requestId: placeRequestId,
+        type: 'game_state',
+        payload: {
+          state: makeState({
+            current_player: 1,
+            is_pass: true,
+            black_count: 5,
+            white_count: 2,
+          }),
+          moves: makeMoves([{ row: 4, col: 5 }]),
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('AI passed. Your turn continues.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Cell 5-6 legal move' })).toBeInTheDocument()
+    })
   })
 })

@@ -14,6 +14,7 @@ describe('GameInfo', () => {
         whiteCount={12}
         currentPlayer={2}
         isThinking
+        isPass={false}
         isGameOver={false}
       />,
     )
@@ -33,6 +34,7 @@ describe('GameInfo', () => {
         whiteCount={8}
         currentPlayer={1}
         isThinking={false}
+        isPass={false}
         isGameOver={false}
       />,
     )
@@ -47,6 +49,7 @@ describe('GameInfo', () => {
         whiteCount={20}
         currentPlayer={2}
         isThinking={false}
+        isPass={false}
         isGameOver={false}
       />,
     )
@@ -61,10 +64,26 @@ describe('GameInfo', () => {
         whiteCount={31}
         currentPlayer={1}
         isThinking={false}
+        isPass={false}
         isGameOver
       />,
     )
 
     expect(screen.getByText('Game over')).toBeInTheDocument()
+  })
+
+  it('shows pass guidance when the AI has no legal moves', () => {
+    render(
+      <GameInfo
+        blackCount={24}
+        whiteCount={19}
+        currentPlayer={1}
+        isThinking={false}
+        isPass
+        isGameOver={false}
+      />,
+    )
+
+    expect(screen.getByText('AI passed. Your turn continues.')).toBeInTheDocument()
   })
 })

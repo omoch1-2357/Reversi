@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('app flow: level select -> board -> result modal -> restart', async ({ page }) => {
+test('app flow: level select -> board -> back to level select', async ({ page }) => {
   await page.goto('/Reversi/')
 
   await expect(page.getByRole('heading', { name: 'Select difficulty' })).toBeVisible()
@@ -10,12 +10,10 @@ test('app flow: level select -> board -> result modal -> restart', async ({ page
 
   await expect(page.getByRole('grid', { name: 'Reversi board' })).toBeVisible()
   await expect(page.getByText('Your turn (Black)')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restart level 4' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Preview result' }).click()
-  await expect(page.getByRole('dialog', { name: 'Game result' })).toBeVisible()
-
-  await page.getByRole('button', { name: 'Restart' }).click()
-  await expect(page.getByRole('dialog', { name: 'Game result' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Back to level select' }).click()
+  await expect(page.getByRole('heading', { name: 'Select difficulty' })).toBeVisible()
 })
 
 test('worker e2e flow is deterministic with real wasm', async ({ page }) => {

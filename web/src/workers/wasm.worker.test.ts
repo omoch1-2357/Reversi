@@ -286,6 +286,11 @@ describe('wasm worker handler', () => {
       {
         requestId,
         type: 'ai_step',
+        payload: { state: afterPlayerMove },
+      },
+      {
+        requestId,
+        type: 'ai_step',
         payload: { state: aiStep },
       },
       {
@@ -375,6 +380,7 @@ describe('wasm worker handler', () => {
 
     expect(wasmMock.aiMove).toHaveBeenCalledTimes(2)
     expect(posted).toEqual([
+      { type: 'ai_step', payload: { state: afterPlayerMove } },
       { type: 'ai_step', payload: { state: aiStep1 } },
       { type: 'ai_step', payload: { state: aiStep2 } },
       {
@@ -397,6 +403,7 @@ describe('wasm worker handler', () => {
     await handler({ data: { type: 'place_stone', payload: { row: 0, col: 0 } } })
 
     expect(posted).toEqual([
+      { type: 'ai_step', payload: { state: afterPlayerMove } },
       { type: 'ai_step', payload: { state: finalState } },
       { type: 'game_over', payload: { state: finalState, result } },
     ])

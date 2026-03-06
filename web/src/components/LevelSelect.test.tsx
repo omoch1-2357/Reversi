@@ -48,6 +48,23 @@ describe('LevelSelect', () => {
     expect(screen.getByRole('button', { name: 'Start level 3' })).toBeDisabled()
   })
 
+  it('disables only the start button when startDisabled is true', () => {
+    const onLevelChange = vi.fn()
+    const onStart = vi.fn()
+    render(
+      <LevelSelect
+        selectedLevel={3}
+        startDisabled
+        onLevelChange={onLevelChange}
+        onStart={onStart}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /^Level 1$/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /^Level 6$/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Start level 3' })).toBeDisabled()
+  })
+
   it('shows preparing text while loading', () => {
     const onLevelChange = vi.fn()
     const onStart = vi.fn()
