@@ -96,4 +96,23 @@ describe('LevelSelect', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Model loading failed')
   })
+
+  it('keeps level buttons enabled when startDisabled and error are both set', () => {
+    const onLevelChange = vi.fn()
+    const onStart = vi.fn()
+    render(
+      <LevelSelect
+        selectedLevel={3}
+        startDisabled
+        error="init_game failed"
+        onLevelChange={onLevelChange}
+        onStart={onStart}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('init_game failed')
+    expect(screen.getByRole('button', { name: /^Level 1$/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /^Level 6$/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Start level 3' })).toBeDisabled()
+  })
 })

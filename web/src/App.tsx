@@ -84,6 +84,9 @@ function App() {
       return
     }
 
+    // handleCellClick intentionally consumes placeStone rejections because useGame
+    // exposes the error state to the UI; this catch only prevents unhandled
+    // promise rejection warnings from bubbling out of the event handler.
     void placeStone(row, col).catch(() => undefined)
   }
 

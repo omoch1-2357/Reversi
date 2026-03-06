@@ -86,4 +86,19 @@ describe('GameInfo', () => {
 
     expect(screen.getByText('AI passed. Your turn continues.')).toBeInTheDocument()
   })
+
+  it('shows pass guidance when the player has no legal moves', () => {
+    render(
+      <GameInfo
+        blackCount={19}
+        whiteCount={24}
+        currentPlayer={2}
+        isThinking={false}
+        isPass
+        isGameOver={false}
+      />,
+    )
+
+    expect(screen.getByText('You have no legal moves. AI continues.')).toBeInTheDocument()
+  })
 })
