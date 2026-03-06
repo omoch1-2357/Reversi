@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
@@ -163,6 +163,18 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('grid', { name: 'Reversi board' })).toBeInTheDocument()
     })
+  })
+
+  it('ignores rapid repeated start attempts while the first init request is in flight', () => {
+    render(<App />)
+
+    const startButton = screen.getByRole('button', { name: 'Start level 3' })
+    fireEvent.click(startButton)
+    fireEvent.click(startButton)
+
+    const worker = MockWorker.latest()
+    expect(worker.postedMessages).toHaveLength(1)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('can close the result modal without resetting and restart from outside the modal', async () => {

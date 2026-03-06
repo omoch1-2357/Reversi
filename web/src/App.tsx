@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import Board from './components/Board'
 import GameInfo from './components/GameInfo'
@@ -26,6 +26,7 @@ const MODEL_LOAD_ERROR =
   'モデルデータの読み込みに失敗しました。再試行してください。'
 const MODEL_LOAD_GUIDANCE =
   '再試行しても改善しない場合は、ページを再読み込みして再度開始してください。'
+const CONCURRENT_REQUEST_ERROR = 'Another worker request is already in progress'
 
 const toPlayer = (value: number): Player =>
   value === PLAYER_WHITE ? PLAYER_WHITE : PLAYER_BLACK
@@ -38,6 +39,7 @@ function App() {
   const [selectedLevel, setSelectedLevel] = useState(DEFAULT_LEVEL)
   const [initError, setInitError] = useState<string | null>(null)
   const [isResultModalOpen, setIsResultModalOpen] = useState(false)
+  const transitionRequestInFlightRef = useRef(false)
   const {
     gameState,
     legalMoves,
@@ -53,29 +55,52 @@ function App() {
     setIsResultModalOpen(result !== null)
   }, [result])
 
+  const isConcurrentRequestError = (caughtError: unknown): boolean =>
+    caughtError instanceof Error && caughtError.message === CONCURRENT_REQUEST_ERROR
+
   const handleStartAttempt = async (): Promise<void> => {
+    if (transitionRequestInFlightRef.current) {
+      return
+    }
+
+    transitionRequestInFlightRef.current = true
     setInitError(null)
     setIsResultModalOpen(false)
 
     try {
       await startGame(selectedLevel)
       setScreen('game')
-    } catch {
+    } catch (caughtError: unknown) {
+      if (isConcurrentRequestError(caughtError)) {
+        return
+      }
       setInitError(MODEL_LOAD_ERROR)
       setScreen('level_select')
+    } finally {
+      transitionRequestInFlightRef.current = false
     }
   }
 
   const handleRestart = async (): Promise<void> => {
+    if (transitionRequestInFlightRef.current) {
+      return
+    }
+
+    transitionRequestInFlightRef.current = true
     setInitError(null)
     setIsResultModalOpen(false)
 
     try {
       await restart()
       setScreen('game')
-    } catch {
+    } catch (caughtError: unknown) {
+      if (isConcurrentRequestError(caughtError)) {
+        return
+      }
       setInitError(MODEL_LOAD_ERROR)
       setScreen('level_select')
+    } finally {
+      transitionRequestInFlightRef.current = false
     }
   }
 
