@@ -1,19 +1,19 @@
 :root {
-  --font-display: "Palatino Linotype", "Yu Mincho", Georgia, serif;
-  --font-body: "Trebuchet MS", "Verdana", "Yu Gothic", sans-serif;
-  --text-main: #201811;
-  --text-muted: #6b5b4b;
-  --panel-bg: rgb(252 247 239 / 88%);
-  --panel-alt: #f3e8d7;
-  --border-strong: #8f7558;
-  --border-soft: rgb(143 117 88 / 24%);
-  --accent: #9c3f1e;
-  --accent-strong: #7d2e12;
-  --accent-soft: #f4d7b0;
-  --board-green: #204f40;
-  --board-green-bright: #2f725f;
-  --shadow-lg: 0 28px 60px rgb(46 31 18 / 18%);
-  --shadow-md: 0 16px 32px rgb(46 31 18 / 12%);
+  --font-display: "Segoe UI", "Yu Gothic UI", sans-serif;
+  --font-body: "Segoe UI", "Yu Gothic UI", sans-serif;
+  --text-main: #111827;
+  --text-muted: #4b5563;
+  --panel-bg: #ffffff;
+  --panel-alt: #f9fafb;
+  --border-strong: #d1d5db;
+  --border-soft: #e5e7eb;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #dbeafe;
+  --board-green: #2f855a;
+  --board-green-bright: #38a169;
+  --shadow-lg: 0 10px 24px rgb(15 23 42 / 8%);
+  --shadow-md: 0 4px 12px rgb(15 23 42 / 6%);
 
   font-family: var(--font-body);
   line-height: 1.5;
@@ -35,10 +35,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   color: var(--text-main);
-  background:
-    radial-gradient(circle at top left, rgb(240 203 163 / 72%), transparent 34%),
-    radial-gradient(circle at top right, rgb(109 149 133 / 34%), transparent 28%),
-    linear-gradient(160deg, #f2e6d5 0%, #efe6da 44%, #e1d2be 100%);
+  background: #f3f4f6;
 }
 
 #root {
@@ -52,5 +49,5 @@ button {
 
 button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
