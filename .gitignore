@@ -1,5 +1,6 @@
 rust/target/
 rust/pkg/
+node_modules/
 .pre-commit-cache/
 __pycache__/
 *.py[cod]
