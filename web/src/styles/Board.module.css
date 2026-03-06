@@ -40,7 +40,7 @@
 
 .board-shell__viewport::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: #cbd5e1;
+  background: var(--border-strong);
 }
 
 .board {
@@ -55,7 +55,7 @@
   border-radius: 0;
   overflow: hidden;
   background: var(--board-green);
-  box-shadow: inset 0 0 0 1px #111827;
+  box-shadow: inset 0 0 0 1px var(--text-main);
 }
 
 @media (max-width: 767px) {
