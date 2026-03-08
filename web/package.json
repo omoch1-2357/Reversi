@@ -9,7 +9,9 @@
     "build": "npm run build:wasm && tsc -b && vite build",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test e2e/app.e2e.spec.ts --project=desktop-chromium --project=mobile-chromium",
+    "test:compat": "playwright test e2e/compat.e2e.spec.ts --project=compat-chromium --project=compat-firefox --project=compat-webkit",
+    "test:wasm-size": "node ./scripts/check-wasm-size.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
