@@ -11,6 +11,7 @@ use pyo3::prelude::*;
     progress_callback = None
 ))]
 fn train_to_bytes(
+    py: Python<'_>,
     games: usize,
     alpha: f32,
     lambda_: f32,
@@ -37,27 +38,29 @@ fn train_to_bytes(
         }
     };
 
-    let result = if progress_callback.is_some() {
-        reversi::training::train_to_bytes(
-            games,
-            alpha,
-            lambda_,
-            epsilon,
-            seed,
-            progress_interval,
-            Some(&mut progress),
-        )
-    } else {
-        reversi::training::train_to_bytes(
-            games,
-            alpha,
-            lambda_,
-            epsilon,
-            seed,
-            progress_interval,
-            None,
-        )
-    };
+    let result = py.allow_threads(|| {
+        if progress_callback.is_some() {
+            reversi::training::train_to_bytes(
+                games,
+                alpha,
+                lambda_,
+                epsilon,
+                seed,
+                progress_interval,
+                Some(&mut progress),
+            )
+        } else {
+            reversi::training::train_to_bytes(
+                games,
+                alpha,
+                lambda_,
+                epsilon,
+                seed,
+                progress_interval,
+                None,
+            )
+        }
+    });
 
     match result {
         Ok(bytes) => Ok(bytes),

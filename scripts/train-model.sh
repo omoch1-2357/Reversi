@@ -14,11 +14,6 @@ else
   exit 1
 fi
 
-if ! command -v maturin >/dev/null 2>&1; then
-  echo "maturin was not found in PATH. Install python requirements first." >&2
-  exit 1
-fi
-
 has_cli_option() {
   local long_option="$1"
   shift
@@ -35,6 +30,11 @@ has_cli_option() {
 
 echo "> ${PYTHON_BIN} -m pip install -r python/requirements.txt"
 "${PYTHON_BIN}" -m pip install -r python/requirements.txt
+
+if ! command -v maturin >/dev/null 2>&1; then
+  echo "maturin was not found in PATH after installing python requirements." >&2
+  exit 1
+fi
 
 echo "> maturin build --release --manifest-path python/rust_training_ext/Cargo.toml --out python/dist --interpreter ${PYTHON_BIN}"
 maturin build \

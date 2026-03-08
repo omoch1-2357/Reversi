@@ -20,7 +20,9 @@ def _load_extension() -> ModuleType:
     try:
         return import_module(_MODULE_NAME)
     except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
-        raise RuntimeError(_IMPORT_ERROR_MESSAGE) from exc
+        if getattr(exc, "name", None) == _MODULE_NAME:
+            raise RuntimeError(_IMPORT_ERROR_MESSAGE) from exc
+        raise
 
 
 def train_to_bytes(

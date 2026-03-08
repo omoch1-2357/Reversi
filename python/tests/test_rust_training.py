@@ -9,11 +9,28 @@ def test_train_to_bytes_raises_clear_error_when_extension_is_missing(
     monkeypatch,
 ) -> None:
     def _raise(_name: str):
-        raise ImportError("missing extension")
+        raise ModuleNotFoundError("missing extension", name="_reversi_training")
 
     monkeypatch.setattr(rust_training, "import_module", _raise)
 
     with pytest.raises(RuntimeError, match="Rust training extension is not installed"):
+        rust_training.train_to_bytes(
+            games=0,
+            alpha=0.01,
+            lambda_=0.7,
+            epsilon=0.1,
+            seed=42,
+            progress_interval=0,
+        )
+
+
+def test_train_to_bytes_propagates_internal_import_error(monkeypatch) -> None:
+    def _raise(_name: str):
+        raise ImportError("dependency ABI mismatch", name="numpy")
+
+    monkeypatch.setattr(rust_training, "import_module", _raise)
+
+    with pytest.raises(ImportError, match="dependency ABI mismatch"):
         rust_training.train_to_bytes(
             games=0,
             alpha=0.01,
