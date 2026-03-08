@@ -180,11 +180,11 @@
 - [x] python-test: `pytest`
 - [x] wasm-build: `wasm-pack build`
 - [x] web-build: `npm ci && npm run build`
-- [ ] performance-test: 要件3.1準拠（seed=42, 100局面, 手数20〜40, ウォームアップ, 各レベル p95 < 3秒）
-- [ ] wasm-integration-test: T-06, T-07, T-08, T-10, T-11, T-12, T-13 + 未終局 `get_result()` エラー検証
+- [x] performance-test: 要件3.1準拠（seed=42, 100局面, 手数20〜40, ウォームアップ, 各レベル p95 < 3秒）
+- [x] wasm-integration-test: T-06, T-07, T-08, T-10, T-11, T-12, T-13 + 未終局 `get_result()` エラー検証
 - [x] wasm-size-check: gzip 後 ≤ 10MB
 - [x] e2e-test: Playwright（PC 1280×720 + モバイル 375×667）
-- [ ] ブラウザ互換テスト（NF-02）: Playwright ブラウザマトリクス（`chromium` / `firefox` / `webkit`）で主要フローを検証（起動、着手、AI応答、終局表示）
+- [x] ブラウザ互換テスト（NF-02）: Playwright ブラウザマトリクス（`chromium` / `firefox` / `webkit`）で主要フローを検証（起動、着手、AI応答、終局表示）
 
 ### 5-2. CD ワークフロー（`.github/workflows/deploy.yml`）
 
