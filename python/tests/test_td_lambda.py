@@ -99,3 +99,34 @@ def test_play_one_game_is_reproducible_with_fixed_seed() -> None:
         for a, b in zip(ntuple_a.weights, ntuple_b.weights, strict=True)
     )
     assert any(np.count_nonzero(w) > 0 for w in ntuple_a.weights)
+
+
+def test_train_reports_progress_at_interval_and_completion() -> None:
+    ntuple = RecordingNTuple(value=0.0)
+    trainer = TDLambdaTrainer(ntuple, alpha=0.0, lambda_=0.0, epsilon=0.0, seed=5)
+    progress_updates: list[tuple[int, int, float]] = []
+
+    trainer.train(
+        5,
+        progress_interval=2,
+        progress_callback=lambda done, total, elapsed: progress_updates.append(
+            (done, total, elapsed)
+        ),
+    )
+
+    assert [done for done, _, _ in progress_updates] == [2, 4, 5]
+    assert all(total == 5 for _, total, _ in progress_updates)
+    assert all(elapsed >= 0.0 for _, _, elapsed in progress_updates)
+
+
+def test_train_rejects_negative_progress_interval() -> None:
+    trainer = TDLambdaTrainer(
+        NTupleNetwork(),
+        alpha=0.01,
+        lambda_=0.7,
+        epsilon=0.1,
+        seed=42,
+    )
+
+    with pytest.raises(ValueError, match="progress_interval must be >= 0"):
+        trainer.train(1, progress_interval=-1)

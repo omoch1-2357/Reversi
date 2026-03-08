@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
+from time import perf_counter
 
 from board import Board
 from ntuple import NTupleNetwork
+
+ProgressCallback = Callable[[int, int, float], None]
 
 
 class TDLambdaTrainer:
@@ -32,12 +36,35 @@ class TDLambdaTrainer:
         self.epsilon = epsilon
         self._rng = random.Random(seed)
 
-    def train(self, num_games: int) -> None:
+    def train(
+        self,
+        num_games: int,
+        progress_interval: int = 0,
+        progress_callback: ProgressCallback | None = None,
+    ) -> None:
         """Run repeated self-play games and update weights after each game."""
         if num_games < 0:
             raise ValueError(f"num_games must be >= 0, got {num_games}")
-        for _ in range(num_games):
+        if progress_interval < 0:
+            raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")
+
+        start_time = perf_counter()
+        for game_idx in range(1, num_games + 1):
             self._play_one_game()
+            if (
+                progress_callback is not None
+                and progress_interval > 0
+                and game_idx % progress_interval == 0
+            ):
+                progress_callback(game_idx, num_games, perf_counter() - start_time)
+
+        if (
+            progress_callback is not None
+            and progress_interval > 0
+            and num_games > 0
+            and num_games % progress_interval != 0
+        ):
+            progress_callback(num_games, num_games, perf_counter() - start_time)
 
     def _play_one_game(self) -> None:
         """Play one self-play game and apply TD-Lambda backward updates."""

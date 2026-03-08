@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 import struct
 import sys
+from time import perf_counter
 from typing import Sequence
 import zlib
 
@@ -43,7 +44,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=42,
         help="Random seed for reproducible training runs.",
     )
+    parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=10_000,
+        help="Emit progress every N games (0 disables periodic logs).",
+    )
     return parser
+
+
+def log_training_progress(completed: int, total: int, elapsed_seconds: float) -> None:
+    """Print a concise periodic progress update for long training runs."""
+    progress_percent = 100.0 if total == 0 else (completed / total) * 100.0
+    games_per_second = 0.0 if elapsed_seconds <= 0.0 else completed / elapsed_seconds
+    print(
+        f"[progress] {completed}/{total} games "
+        f"({progress_percent:.1f}%) elapsed={elapsed_seconds:.1f}s "
+        f"rate={games_per_second:.2f} games/s"
+    )
 
 
 def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -> None:
@@ -124,10 +142,13 @@ def train_and_export(
     epsilon: float,
     output: Path,
     seed: int,
+    progress_interval: int,
 ) -> Path:
     """Run training, export the model, and validate the resulting binary."""
     if games < 0:
         raise ValueError(f"games must be >= 0, got {games}")
+    if progress_interval < 0:
+        raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")
 
     output_path = output
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +161,11 @@ def train_and_export(
         epsilon=epsilon,
         seed=seed,
     )
-    trainer.train(games)
+    trainer.train(
+        games,
+        progress_interval=progress_interval,
+        progress_callback=log_training_progress,
+    )
     export_model(ntuple, output_path)
     verify_exported_model(output_path, ntuple.TUPLE_PATTERNS)
     return output_path
@@ -154,8 +179,10 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Training with "
             f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
-            f"epsilon={args.epsilon}, seed={args.seed}"
+            f"epsilon={args.epsilon}, seed={args.seed}, "
+            f"progress_interval={args.progress_interval}"
         )
+        start_time = perf_counter()
         output_path = train_and_export(
             games=args.games,
             alpha=args.alpha,
@@ -163,8 +190,12 @@ def main(argv: list[str] | None = None) -> int:
             epsilon=args.epsilon,
             output=args.output,
             seed=args.seed,
+            progress_interval=args.progress_interval,
         )
-        print(f"Model exported and verified: {output_path}")
+        print(
+            f"Model exported and verified: {output_path} "
+            f"(elapsed={perf_counter() - start_time:.1f}s)"
+        )
         return 0
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)

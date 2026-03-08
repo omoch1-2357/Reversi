@@ -23,6 +23,8 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
             "out.bin",
             "--seed",
             "2026",
+            "--progress-interval",
+            "25",
         ]
     )
 
@@ -32,6 +34,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
     assert args.epsilon == pytest.approx(0.05)
     assert str(args.output) == "out.bin"
     assert args.seed == 2026
+    assert args.progress_interval == 25
 
 
 def test_main_runs_pipeline_and_outputs_valid_model(tmp_path) -> None:
@@ -68,3 +71,28 @@ def test_verify_exported_model_detects_crc_mismatch(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="CRC32 mismatch"):
         verify_exported_model(output, NTupleNetwork.TUPLE_PATTERNS)
+
+
+def test_main_emits_progress_logs(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    run_dir = tmp_path / "progress-logs"
+    run_dir.mkdir()
+    output = run_dir / "weights.bin"
+
+    exit_code = main(
+        [
+            "--games",
+            "3",
+            "--output",
+            str(output),
+            "--seed",
+            "42",
+            "--progress-interval",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "progress_interval=2" in captured.out
+    assert "[progress] 2/3 games" in captured.out
+    assert "[progress] 3/3 games" in captured.out
