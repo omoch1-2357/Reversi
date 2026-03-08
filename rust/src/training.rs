@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Instant;
 
 use rand::Rng;
@@ -27,10 +28,64 @@ pub const TUPLE_PATTERNS: &[&[u8]] = &[
 
 const MAGIC: &[u8; 4] = b"NTRV";
 const VERSION: u32 = 1;
+const ROTATION_COUNT: usize = 4;
+const TUPLE_COUNT: usize = 14;
+const MAX_TUPLE_LEN: usize = 10;
+
+#[derive(Debug, Clone, Copy)]
+struct CompiledTuple {
+    len: usize,
+    rotated_positions: [[u8; MAX_TUPLE_LEN]; ROTATION_COUNT],
+}
+
+static COMPILED_TUPLES: LazyLock<[CompiledTuple; TUPLE_COUNT]> = LazyLock::new(|| {
+    std::array::from_fn(|tuple_idx| {
+        let pattern = TUPLE_PATTERNS[tuple_idx];
+        let mut rotated_positions = [[0u8; MAX_TUPLE_LEN]; ROTATION_COUNT];
+
+        for rotation in 0..ROTATION_COUNT {
+            for (cell_idx, &pos) in pattern.iter().enumerate() {
+                rotated_positions[rotation][cell_idx] = rotate_pos(pos, rotation as u8) as u8;
+            }
+        }
+
+        CompiledTuple {
+            len: pattern.len(),
+            rotated_positions,
+        }
+    })
+});
 
 pub trait TrainingNetwork {
     fn evaluate(&self, board: &Board, is_black: bool) -> f32;
     fn update(&mut self, board: &Board, is_black: bool, delta: f32);
+
+    fn td_lambda_step(
+        &mut self,
+        board: &Board,
+        is_black: bool,
+        next_value: f32,
+        cumulative_td: f32,
+        next_player: Option<bool>,
+        alpha: f32,
+        lambda_: f32,
+    ) -> (f32, f32) {
+        let current_value = self.evaluate(board, is_black);
+        let td_error = next_value - current_value;
+        let next_cumulative_td = if let Some(previous_player) = next_player {
+            let signed_lambda = if is_black == previous_player {
+                lambda_
+            } else {
+                -lambda_
+            };
+            td_error + signed_lambda * cumulative_td
+        } else {
+            td_error
+        };
+
+        self.update(board, is_black, alpha * next_cumulative_td);
+        (current_value, next_cumulative_td)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +107,13 @@ impl TrainableNTuple {
             return Err("weights length must match tuple patterns length".to_string());
         }
 
-        let mut data = Vec::new();
+        let tuple_defs_len: usize = TUPLE_PATTERNS.iter().map(|pattern| 1 + pattern.len()).sum();
+        let weights_bytes: usize = self
+            .weights
+            .iter()
+            .map(|weights| weights.len() * std::mem::size_of::<f32>())
+            .sum();
+        let mut data = Vec::with_capacity(tuple_defs_len + weights_bytes);
 
         for pattern in TUPLE_PATTERNS {
             data.push(pattern.len() as u8);
@@ -86,6 +147,49 @@ impl TrainableNTuple {
     pub fn raw_weights(&self) -> &[Vec<f32>] {
         &self.weights
     }
+
+    fn compute_feature_indices(
+        board: &Board,
+        is_black: bool,
+    ) -> [[usize; TUPLE_COUNT]; ROTATION_COUNT] {
+        let (black, white) = board.bitboards();
+        let (me, opp) = if is_black {
+            (black, white)
+        } else {
+            (white, black)
+        };
+        let mut indices = [[0usize; TUPLE_COUNT]; ROTATION_COUNT];
+
+        for rotation in 0..ROTATION_COUNT {
+            for tuple_idx in 0..TUPLE_COUNT {
+                let compiled = &COMPILED_TUPLES[tuple_idx];
+                indices[rotation][tuple_idx] =
+                    tuple_index(&compiled.rotated_positions[rotation], compiled.len, me, opp);
+            }
+        }
+
+        indices
+    }
+
+    fn sum_feature_indices(&self, indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT]) -> f32 {
+        let mut score = 0.0f32;
+
+        for tuple_indices in indices {
+            for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
+                score += self.weights[tuple_idx][index];
+            }
+        }
+
+        score
+    }
+
+    fn apply_delta(&mut self, indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT], delta: f32) {
+        for tuple_indices in indices {
+            for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
+                self.weights[tuple_idx][index] += delta;
+            }
+        }
+    }
 }
 
 impl Default for TrainableNTuple {
@@ -96,33 +200,41 @@ impl Default for TrainableNTuple {
 
 impl TrainingNetwork for TrainableNTuple {
     fn evaluate(&self, board: &Board, is_black: bool) -> f32 {
-        let mut score = 0.0f32;
-        let (black, white) = board.bitboards();
-
-        for rotation in 0..4u8 {
-            for (tuple, weights) in TUPLE_PATTERNS.iter().zip(self.weights.iter()) {
-                let index = tuple.iter().fold(0usize, |acc, &pos| {
-                    let value = cell_state(black, white, rotate_pos(pos, rotation), is_black);
-                    acc * 3 + value
-                });
-                score += weights[index];
-            }
-        }
-
-        score
+        let indices = Self::compute_feature_indices(board, is_black);
+        self.sum_feature_indices(&indices)
     }
 
     fn update(&mut self, board: &Board, is_black: bool, delta: f32) {
-        let (black, white) = board.bitboards();
-        for rotation in 0..4u8 {
-            for (tuple, weights) in TUPLE_PATTERNS.iter().zip(self.weights.iter_mut()) {
-                let index = tuple.iter().fold(0usize, |acc, &pos| {
-                    let value = cell_state(black, white, rotate_pos(pos, rotation), is_black);
-                    acc * 3 + value
-                });
-                weights[index] += delta;
-            }
-        }
+        let indices = Self::compute_feature_indices(board, is_black);
+        self.apply_delta(&indices, delta);
+    }
+
+    fn td_lambda_step(
+        &mut self,
+        board: &Board,
+        is_black: bool,
+        next_value: f32,
+        cumulative_td: f32,
+        next_player: Option<bool>,
+        alpha: f32,
+        lambda_: f32,
+    ) -> (f32, f32) {
+        let indices = Self::compute_feature_indices(board, is_black);
+        let current_value = self.sum_feature_indices(&indices);
+        let td_error = next_value - current_value;
+        let next_cumulative_td = if let Some(previous_player) = next_player {
+            let signed_lambda = if is_black == previous_player {
+                lambda_
+            } else {
+                -lambda_
+            };
+            td_error + signed_lambda * cumulative_td
+        } else {
+            td_error
+        };
+
+        self.apply_delta(&indices, alpha * next_cumulative_td);
+        (current_value, next_cumulative_td)
     }
 }
 
@@ -194,7 +306,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let mut board = Board::new();
         let mut is_black = true;
         let mut consecutive_passes = 0usize;
-        let mut history: Vec<(Board, bool)> = Vec::new();
+        let mut history: Vec<(Board, bool)> = Vec::with_capacity(60);
 
         while consecutive_passes < 2 {
             let legal = board.legal_moves(is_black);
@@ -219,19 +331,24 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
     }
 
     fn select_move(&mut self, board: &Board, is_black: bool, legal: u64) -> Result<usize, String> {
-        let moves = legal_moves_from_mask(legal);
-        if moves.is_empty() {
+        if legal == 0 {
             return Err("legal move mask contains no moves".to_string());
         }
 
+        let move_count = legal.count_ones();
         if self.rng.gen_bool(self.epsilon) {
-            let choice = self.rng.gen_range(0..moves.len());
-            return Ok(moves[choice]);
+            let choice = self.rng.gen_range(0..move_count);
+            return Ok(nth_move_from_mask(legal, choice));
         }
 
-        let mut best_move = moves[0];
+        let mut remaining = legal;
+        let mut best_move = remaining.trailing_zeros() as usize;
         let mut best_score = f32::NEG_INFINITY;
-        for mv in moves {
+
+        while remaining != 0 {
+            let mv = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+
             let mut next_board = *board;
             let flipped = next_board.place(mv, is_black);
             if flipped == 0 {
@@ -243,6 +360,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
                 best_move = mv;
             }
         }
+
         Ok(best_move)
     }
 
@@ -269,21 +387,16 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let mut next_player: Option<bool> = None;
 
         for &(board, is_black) in history.iter().rev() {
-            let current_value = self.network.evaluate(&board, is_black);
-            let td_error = next_value - current_value;
-            if let Some(previous_player) = next_player {
-                let signed_lambda = if is_black == previous_player {
-                    self.lambda_
-                } else {
-                    -self.lambda_
-                };
-                cumulative_td = td_error + signed_lambda * cumulative_td;
-            } else {
-                cumulative_td = td_error;
-            }
-
-            let delta = self.alpha * cumulative_td;
-            self.network.update(&board, is_black, delta);
+            let (current_value, next_cumulative_td) = self.network.td_lambda_step(
+                &board,
+                is_black,
+                next_value,
+                cumulative_td,
+                next_player,
+                self.alpha,
+                self.lambda_,
+            );
+            cumulative_td = next_cumulative_td;
             next_value = -current_value;
             next_player = Some(is_black);
         }
@@ -305,15 +418,18 @@ pub fn train_to_bytes(
     trainer.into_network().to_bytes()
 }
 
-fn legal_moves_from_mask(mask: u64) -> Vec<usize> {
+fn nth_move_from_mask(mask: u64, target: u32) -> usize {
     let mut remaining = mask;
-    let mut moves = Vec::new();
-    while remaining != 0 {
+    let mut skip = target;
+
+    loop {
         let idx = remaining.trailing_zeros() as usize;
-        moves.push(idx);
+        if skip == 0 {
+            return idx;
+        }
         remaining &= remaining - 1;
+        skip -= 1;
     }
-    moves
 }
 
 fn rotate_pos(pos: u8, rotation: u8) -> usize {
@@ -331,12 +447,22 @@ fn rotate_pos(pos: u8, rotation: u8) -> usize {
     nr * BOARD_SIZE + nc
 }
 
-fn cell_state(black: u64, white: u64, pos: usize, is_black: bool) -> usize {
+fn tuple_index(positions: &[u8; MAX_TUPLE_LEN], len: usize, me: u64, opp: u64) -> usize {
+    let mut index = 0usize;
+
+    for &pos in positions.iter().take(len) {
+        index = index * 3 + cell_state(me, opp, pos as usize);
+    }
+
+    index
+}
+
+fn cell_state(me: u64, opp: u64, pos: usize) -> usize {
     let square = 1u64 << pos;
-    if (black & square) != 0 {
-        if is_black { 1 } else { 2 }
-    } else if (white & square) != 0 {
-        if is_black { 2 } else { 1 }
+    if (me & square) != 0 {
+        1
+    } else if (opp & square) != 0 {
+        2
     } else {
         0
     }

@@ -1,15 +1,7 @@
 const BOARD_SIZE: usize = 8;
 const NUM_SQUARES: usize = BOARD_SIZE * BOARD_SIZE;
-const DIRECTIONS: [(i32, i32); 8] = [
-    (-1, -1),
-    (-1, 0),
-    (-1, 1),
-    (0, -1),
-    (0, 1),
-    (1, -1),
-    (1, 0),
-    (1, 1),
-];
+const NOT_A_FILE: u64 = 0xfefefefefefefefe;
+const NOT_H_FILE: u64 = 0x7f7f7f7f7f7f7f7f;
 
 /// Reversi board state represented by two bitboards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,21 +33,16 @@ impl Board {
         } else {
             (self.white, self.black)
         };
+        let empty = !(me | opp);
 
-        let occupied = me | opp;
-        let mut legal = 0u64;
-
-        for pos in 0..NUM_SQUARES {
-            let move_bit = bit(pos);
-            if (occupied & move_bit) != 0 {
-                continue;
-            }
-            if Self::collect_flips(pos, me, opp) != 0 {
-                legal |= move_bit;
-            }
-        }
-
-        legal
+        legal_moves_dir(me, opp, empty, shift_east)
+            | legal_moves_dir(me, opp, empty, shift_west)
+            | legal_moves_dir(me, opp, empty, shift_north)
+            | legal_moves_dir(me, opp, empty, shift_south)
+            | legal_moves_dir(me, opp, empty, shift_north_east)
+            | legal_moves_dir(me, opp, empty, shift_north_west)
+            | legal_moves_dir(me, opp, empty, shift_south_east)
+            | legal_moves_dir(me, opp, empty, shift_south_west)
     }
 
     /// Places one stone and flips captured stones.
@@ -129,35 +116,14 @@ impl Board {
             return 0;
         }
 
-        let (row, col) = pos_to_row_col(pos);
-        let mut flips = 0u64;
-
-        for (dr, dc) in DIRECTIONS {
-            let mut r = row + dr;
-            let mut c = col + dc;
-            let mut line = 0u64;
-            let mut has_opponent = false;
-
-            while in_bounds(r, c) {
-                let square = bit((r as usize) * BOARD_SIZE + c as usize);
-                if (opp & square) != 0 {
-                    has_opponent = true;
-                    line |= square;
-                } else if (me & square) != 0 {
-                    if has_opponent {
-                        flips |= line;
-                    }
-                    break;
-                } else {
-                    break;
-                }
-
-                r += dr;
-                c += dc;
-            }
-        }
-
-        flips
+        flips_dir(move_bit, me, opp, shift_east)
+            | flips_dir(move_bit, me, opp, shift_west)
+            | flips_dir(move_bit, me, opp, shift_north)
+            | flips_dir(move_bit, me, opp, shift_south)
+            | flips_dir(move_bit, me, opp, shift_north_east)
+            | flips_dir(move_bit, me, opp, shift_north_west)
+            | flips_dir(move_bit, me, opp, shift_south_east)
+            | flips_dir(move_bit, me, opp, shift_south_west)
     }
 }
 
@@ -171,12 +137,60 @@ fn bit(pos: usize) -> u64 {
     if pos < NUM_SQUARES { 1u64 << pos } else { 0 }
 }
 
-fn pos_to_row_col(pos: usize) -> (i32, i32) {
-    ((pos / BOARD_SIZE) as i32, (pos % BOARD_SIZE) as i32)
+fn legal_moves_dir(me: u64, opp: u64, empty: u64, shift: fn(u64) -> u64) -> u64 {
+    let mut ray = shift(me) & opp;
+    for _ in 0..5 {
+        ray |= shift(ray) & opp;
+    }
+    shift(ray) & empty
 }
 
-fn in_bounds(row: i32, col: i32) -> bool {
-    (0..BOARD_SIZE as i32).contains(&row) && (0..BOARD_SIZE as i32).contains(&col)
+fn flips_dir(move_bit: u64, me: u64, opp: u64, shift: fn(u64) -> u64) -> u64 {
+    let mut cursor = shift(move_bit) & opp;
+    let mut flips = 0u64;
+
+    while cursor != 0 {
+        flips |= cursor;
+        let next = shift(cursor);
+        if (next & me) != 0 {
+            return flips;
+        }
+        cursor = next & opp;
+    }
+
+    0
+}
+
+fn shift_east(bits: u64) -> u64 {
+    (bits & NOT_H_FILE) << 1
+}
+
+fn shift_west(bits: u64) -> u64 {
+    (bits & NOT_A_FILE) >> 1
+}
+
+fn shift_north(bits: u64) -> u64 {
+    bits >> BOARD_SIZE
+}
+
+fn shift_south(bits: u64) -> u64 {
+    bits << BOARD_SIZE
+}
+
+fn shift_north_east(bits: u64) -> u64 {
+    (bits & NOT_H_FILE) >> (BOARD_SIZE - 1)
+}
+
+fn shift_north_west(bits: u64) -> u64 {
+    (bits & NOT_A_FILE) >> (BOARD_SIZE + 1)
+}
+
+fn shift_south_east(bits: u64) -> u64 {
+    (bits & NOT_H_FILE) << (BOARD_SIZE + 1)
+}
+
+fn shift_south_west(bits: u64) -> u64 {
+    (bits & NOT_A_FILE) << (BOARD_SIZE - 1)
 }
 
 #[cfg(test)]
