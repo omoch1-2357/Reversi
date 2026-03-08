@@ -1,9 +1,12 @@
 import { expect, type Page } from '@playwright/test'
+import {
+  LEGAL_MOVE_ARIA_SUFFIX,
+  PLAYER_TURN_TEXT,
+  RESULT_DIALOG_NAME,
+} from '../src/constants/accessibility'
 
 const APP_PATH = '/Reversi/'
-const LEGAL_MOVE_NAME = /Cell \d-\d legal move/
-const RESULT_DIALOG_NAME = 'Game result'
-const PLAYER_TURN_TEXT = 'Your turn (Black)'
+const LEGAL_MOVE_NAME = new RegExp(`Cell \\d-\\d ${LEGAL_MOVE_ARIA_SUFFIX}`)
 
 export const startLevel = async (page: Page, level: number): Promise<void> => {
   await page.goto(APP_PATH)
