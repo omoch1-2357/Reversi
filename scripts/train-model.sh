@@ -19,19 +19,26 @@ if ! command -v maturin >/dev/null 2>&1; then
   exit 1
 fi
 
-has_output=0
-for arg in "$@"; do
-  if [[ "${arg}" == "--output" || "${arg}" == --output=* ]]; then
-    has_output=1
-    break
-  fi
-done
+has_cli_option() {
+  local long_option="$1"
+  shift
+
+  local arg
+  for arg in "$@"; do
+    if [[ "${arg}" == "${long_option}" || "${arg}" == "${long_option}="* ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
 
 echo "> ${PYTHON_BIN} -m pip install -r python/requirements.txt"
 "${PYTHON_BIN}" -m pip install -r python/requirements.txt
 
-echo "> maturin build --manifest-path python/rust_training_ext/Cargo.toml --out python/dist --interpreter ${PYTHON_BIN}"
+echo "> maturin build --release --manifest-path python/rust_training_ext/Cargo.toml --out python/dist --interpreter ${PYTHON_BIN}"
 maturin build \
+  --release \
   --manifest-path python/rust_training_ext/Cargo.toml \
   --out python/dist \
   --interpreter "${PYTHON_BIN}"
@@ -48,8 +55,14 @@ echo "> ${PYTHON_BIN} -m pip install --force-reinstall ${wheel_path}"
 "${PYTHON_BIN}" -m pip install --force-reinstall "${wheel_path}"
 
 train_args=("$@")
-if [[ "${has_output}" -eq 0 ]]; then
-  train_args+=("--output" "python/dist/weights.bin")
+if ! has_cli_option "--games" "${train_args[@]}"; then
+  train_args+=("--games" "500000")
+fi
+if ! has_cli_option "--progress-interval" "${train_args[@]}"; then
+  train_args+=("--progress-interval" "10000")
+fi
+if ! has_cli_option "--output" "${train_args[@]}"; then
+  train_args+=("--output" "rust/src/ai/weights.bin")
 fi
 
 echo "> ${PYTHON_BIN} python/train.py ${train_args[*]}"

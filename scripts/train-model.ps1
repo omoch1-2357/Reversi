@@ -11,17 +11,30 @@ Set-Location $RepoRoot
 
 function Test-HasCliOption {
     param(
-        [string[]]$Args,
+        [string[]]$OptionArgs,
         [string]$LongOption
     )
 
-    foreach ($arg in $Args) {
+    foreach ($arg in $OptionArgs) {
         if ($arg -eq $LongOption -or $arg.StartsWith("$LongOption=")) {
             return $true
         }
     }
 
     return $false
+}
+
+function Add-DefaultCliOption {
+    param(
+        [System.Collections.Generic.List[string]]$OptionArgs,
+        [string]$LongOption,
+        [string]$Value
+    )
+
+    if (-not (Test-HasCliOption -OptionArgs $OptionArgs.ToArray() -LongOption $LongOption)) {
+        $OptionArgs.Add($LongOption)
+        $OptionArgs.Add($Value)
+    }
 }
 
 function Invoke-Step {
@@ -51,6 +64,7 @@ if (-not $maturinCommand) {
 Invoke-Step $pythonExe @("-m", "pip", "install", "-r", "python/requirements.txt")
 Invoke-Step $maturinCommand.Source @(
     "build",
+    "--release",
     "--manifest-path",
     "python/rust_training_ext/Cargo.toml",
     "--out",
@@ -69,9 +83,13 @@ if (-not $wheel) {
 
 Invoke-Step $pythonExe @("-m", "pip", "install", "--force-reinstall", $wheel.FullName)
 
-$resolvedArgs = @($TrainArgs)
-if (-not (Test-HasCliOption -Args $resolvedArgs -LongOption "--output")) {
-    $resolvedArgs += @("--output", "python/dist/weights.bin")
+$resolvedArgs = [System.Collections.Generic.List[string]]::new()
+foreach ($arg in $TrainArgs) {
+    $resolvedArgs.Add($arg)
 }
 
-Invoke-Step $pythonExe (@("python/train.py") + $resolvedArgs)
+Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--games" -Value "500000"
+Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--progress-interval" -Value "10000"
+Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--output" -Value "rust/src/ai/weights.bin"
+
+Invoke-Step $pythonExe (@("python/train.py") + $resolvedArgs.ToArray())
