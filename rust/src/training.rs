@@ -5,6 +5,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
+use crate::ai::ntuple::compress_model_bytes;
 use crate::board::Board;
 
 pub type ProgressCallback<'a> = &'a mut dyn FnMut(usize, usize, f64) -> Result<(), String>;
@@ -166,7 +167,7 @@ impl TrainableNTuple {
         output.extend_from_slice(&crc32.to_le_bytes());
         output.extend_from_slice(&(self.phase_count as u32).to_le_bytes());
         output.extend_from_slice(&data);
-        Ok(output)
+        compress_model_bytes(&output)
     }
 
     pub fn raw_weights(&self) -> &[Vec<Vec<f32>>] {
@@ -529,7 +530,7 @@ fn pow3(exp: usize) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::ntuple::NTupleEvaluator;
+    use crate::ai::ntuple::{NTupleEvaluator, decompress_model_bytes};
 
     struct RecordingNetwork {
         value: f32,
@@ -699,7 +700,7 @@ mod tests {
     #[test]
     fn train_to_bytes_writes_v2_header_with_phase_count() {
         let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 0, None).unwrap();
-
+        let bytes = decompress_model_bytes(&bytes).unwrap();
         assert_eq!(&bytes[0..4], MAGIC);
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), VERSION);
         assert_eq!(

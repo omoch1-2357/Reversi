@@ -6,6 +6,7 @@ import pytest
 
 from export_model import HEADER_SIZE, MAGIC, VERSION
 from ntuple import NTupleNetwork
+from rust_training import compress_model_bytes, decompress_model_bytes
 from train import build_parser, main, verify_exported_model
 
 
@@ -54,7 +55,7 @@ def test_main_runs_pipeline_and_outputs_valid_model() -> None:
         exit_code = main(["--games", "0", "--output", str(output), "--seed", "42"])
 
         assert exit_code == 0
-        payload = output.read_bytes()
+        payload = decompress_model_bytes(output.read_bytes())
         assert len(payload) >= HEADER_SIZE
 
         magic, version, num_tuples, crc32, phase_count = struct.unpack(
@@ -76,9 +77,9 @@ def test_verify_exported_model_detects_crc_mismatch() -> None:
         result = main(["--games", "0", "--output", str(output), "--seed", "42"])
         assert result == 0
 
-        payload = bytearray(output.read_bytes())
+        payload = bytearray(decompress_model_bytes(output.read_bytes()))
         payload[-1] ^= 0x01
-        output.write_bytes(payload)
+        output.write_bytes(compress_model_bytes(payload))
 
         with pytest.raises(ValueError, match="CRC32 mismatch"):
             verify_exported_model(output, NTupleNetwork.TUPLE_PATTERNS)

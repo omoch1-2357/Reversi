@@ -46,3 +46,13 @@ def train_to_bytes(
             progress_callback=progress_callback,
         )
     )
+
+
+def compress_model_bytes(data: bytes) -> bytes:
+    module = _load_extension()
+    return bytes(module.compress_model_bytes(bytes(data)))
+
+
+def decompress_model_bytes(data: bytes) -> bytes:
+    module = _load_extension()
+    return bytes(module.decompress_model_bytes(bytes(data)))

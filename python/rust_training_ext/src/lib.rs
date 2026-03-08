@@ -24,13 +24,10 @@ fn train_to_bytes(
     let mut progress = |completed: usize, total: usize, elapsed: f64| -> Result<(), String> {
         if let Some(callback) = progress_callback.as_ref() {
             Python::with_gil(|py| {
-                callback
-                    .bind(py)
-                    .call1((completed, total, elapsed))
-                    .map_err(|err| {
-                        callback_error = Some(err);
-                        "python progress callback failed".to_string()
-                    })?;
+                callback.bind(py).call1((completed, total, elapsed)).map_err(|err| {
+                    callback_error = Some(err);
+                    "python progress callback failed".to_string()
+                })?;
                 Ok(())
             })
         } else {
@@ -74,8 +71,24 @@ fn train_to_bytes(
     }
 }
 
+#[pyfunction]
+fn compress_model_bytes(py: Python<'_>, data: Vec<u8>) -> PyResult<Vec<u8>> {
+    py.allow_threads(|| reversi::ai::ntuple::compress_model_bytes(&data))
+        .map_err(PyRuntimeError::new_err)
+}
+
+#[pyfunction]
+fn decompress_model_bytes(py: Python<'_>, data: Vec<u8>) -> PyResult<Vec<u8>> {
+    py.allow_threads(|| {
+        reversi::ai::ntuple::decompress_model_bytes(&data).map(|bytes| bytes.into_owned())
+    })
+    .map_err(PyRuntimeError::new_err)
+}
+
 #[pymodule]
 fn _reversi_training(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(train_to_bytes, module)?)?;
+    module.add_function(wrap_pyfunction!(compress_model_bytes, module)?)?;
+    module.add_function(wrap_pyfunction!(decompress_model_bytes, module)?)?;
     Ok(())
 }

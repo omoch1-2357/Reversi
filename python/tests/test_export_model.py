@@ -4,6 +4,7 @@ import zlib
 
 from export_model import HEADER_SIZE, MAGIC, VERSION, export_model
 from ntuple import NTupleNetwork
+from rust_training import decompress_model_bytes
 
 
 def _exported_payload(ntuple: NTupleNetwork) -> bytes:
@@ -16,7 +17,7 @@ def _exported_payload(ntuple: NTupleNetwork) -> bytes:
     with patch("export_model.Path.write_bytes", autospec=True, side_effect=_capture):
         export_model(ntuple, "weights.bin")
 
-    return captured["payload"]
+    return decompress_model_bytes(captured["payload"])
 
 
 def test_export_model_writes_header_magic_version_num_tuples_and_phase_count() -> None:

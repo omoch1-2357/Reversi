@@ -1,6 +1,11 @@
+use std::borrow::Cow;
+use std::io::Cursor;
+
 use crate::board::Board;
 
 const MAGIC: &[u8; 4] = b"NTRV";
+const ZSTD_MAGIC: &[u8; 4] = &[0x28, 0xB5, 0x2F, 0xFD];
+const ZSTD_LEVEL: i32 = 19;
 const VERSION_V1: u32 = 1;
 const VERSION_V2: u32 = 2;
 const HEADER_SIZE: usize = 20;
@@ -15,9 +20,29 @@ pub struct NTupleEvaluator {
     weights: Vec<Vec<Vec<f32>>>,
 }
 
+pub fn compress_model_bytes(data: &[u8]) -> Result<Vec<u8>, String> {
+    zstd::stream::encode_all(Cursor::new(data), ZSTD_LEVEL)
+        .map_err(|err| format!("failed to zstd-compress weights: {err}"))
+}
+
+pub fn decompress_model_bytes(data: &[u8]) -> Result<Cow<'_, [u8]>, String> {
+    if data.starts_with(ZSTD_MAGIC.as_slice()) {
+        let decoded = zstd::stream::decode_all(Cursor::new(data))
+            .map_err(|err| format!("failed to zstd-decompress weights: {err}"))?;
+        Ok(Cow::Owned(decoded))
+    } else {
+        Ok(Cow::Borrowed(data))
+    }
+}
+
 impl NTupleEvaluator {
     /// Deserialize evaluator data from `weights.bin` format.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
+        let bytes = decompress_model_bytes(data)?;
+        Self::from_uncompressed_bytes(bytes.as_ref())
+    }
+
+    fn from_uncompressed_bytes(data: &[u8]) -> Result<Self, String> {
         if data.len() < HEADER_SIZE {
             return Err(format!(
                 "weights data too short: expected at least {HEADER_SIZE} bytes, got {}",
@@ -366,6 +391,20 @@ mod tests {
 
         let err = NTupleEvaluator::from_bytes(&bytes).unwrap_err();
         assert!(err.contains("unexpected EOF while reading weights"));
+    }
+
+    #[test]
+    fn from_bytes_accepts_zstd_compressed_payload() {
+        let tuples = vec![vec![0, 1]];
+        let weights = vec![vec![vec![0.0; 9]], vec![vec![1.0; 9]]];
+        let bytes = build_weights_blob_v2(&tuples, &weights, 2);
+        let compressed = compress_model_bytes(&bytes).expect("must compress");
+
+        let evaluator = NTupleEvaluator::from_bytes(&compressed).expect("must parse");
+
+        assert_eq!(evaluator.tuples, tuples);
+        assert_eq!(evaluator.phase_count, 2);
+        assert_eq!(evaluator.weights, weights);
     }
 
     #[test]

@@ -78,3 +78,29 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     assert captured["progress_interval"] == 2
     assert captured["progress_callback"] is progress_callback
     assert callback_calls == [(1, 3, 0.25)]
+
+
+def test_model_byte_helpers_delegate_to_extension(monkeypatch) -> None:
+    captured: dict[str, bytes] = {}
+
+    def _compress_model_bytes(data: bytes) -> bytes:
+        captured["compress"] = data
+        return b"compressed-model"
+
+    def _decompress_model_bytes(data: bytes) -> bytes:
+        captured["decompress"] = data
+        return b"raw-model"
+
+    monkeypatch.setattr(
+        rust_training,
+        "import_module",
+        lambda _name: SimpleNamespace(
+            compress_model_bytes=_compress_model_bytes,
+            decompress_model_bytes=_decompress_model_bytes,
+        ),
+    )
+
+    assert rust_training.compress_model_bytes(b"raw") == b"compressed-model"
+    assert rust_training.decompress_model_bytes(b"compressed") == b"raw-model"
+    assert captured["compress"] == b"raw"
+    assert captured["decompress"] == b"compressed"

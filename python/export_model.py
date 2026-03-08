@@ -7,6 +7,7 @@ import struct
 import zlib
 
 from ntuple import NTupleNetwork
+from rust_training import compress_model_bytes
 
 MAGIC = b"NTRV"
 VERSION = 2
@@ -73,4 +74,4 @@ def export_model(ntuple: NTupleNetwork, path: str | Path) -> None:
     header.extend(packed_header)
 
     output = Path(path)
-    output.write_bytes(bytes(header) + data)
+    output.write_bytes(compress_model_bytes(bytes(header) + data))

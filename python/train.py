@@ -12,7 +12,7 @@ import zlib
 
 from export_model import HEADER_SIZE, MAGIC, VERSION
 from ntuple import NTupleNetwork
-from rust_training import train_to_bytes
+from rust_training import decompress_model_bytes, train_to_bytes
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,7 +66,7 @@ def log_training_progress(completed: int, total: int, elapsed_seconds: float) ->
 
 def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -> None:
     """Validate exported bytes for header, CRC32, and deserializable layout."""
-    payload = path.read_bytes()
+    payload = decompress_model_bytes(path.read_bytes())
     if len(payload) < HEADER_SIZE:
         raise ValueError(
             f"model payload too short: expected at least {HEADER_SIZE} bytes, got {len(payload)}"
