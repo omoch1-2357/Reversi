@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use web_time::{Duration, Instant};
 
 use crate::ai::ntuple::NTupleEvaluator;
@@ -19,6 +21,29 @@ enum SearchResult {
     TimedOut,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SearchKey {
+    black: u64,
+    white: u64,
+    is_black: bool,
+    exact: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bound {
+    Exact,
+    Lower,
+    Upper,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TranspositionEntry {
+    depth: u8,
+    best_move: usize,
+    score: f32,
+    bound: Bound,
+}
+
 impl SearchResult {
     fn negate(self) -> Self {
         match self {
@@ -34,6 +59,7 @@ pub struct Searcher<'a> {
     timeout: Duration,
     max_depth: u8,
     timed_out: bool,
+    transposition_table: HashMap<SearchKey, TranspositionEntry>,
 }
 
 impl<'a> Searcher<'a> {
@@ -52,6 +78,7 @@ impl<'a> Searcher<'a> {
             timeout,
             max_depth,
             timed_out: false,
+            transposition_table: HashMap::new(),
         }
     }
 
@@ -60,6 +87,7 @@ impl<'a> Searcher<'a> {
     pub fn search(&mut self, board: &Board, is_black: bool) -> usize {
         self.start_time = Instant::now();
         self.timed_out = false;
+        self.transposition_table.clear();
 
         let legal = board.legal_moves(is_black);
         let moves = bitboard_to_positions(legal);
@@ -119,6 +147,30 @@ impl<'a> Searcher<'a> {
             return SearchResult::Complete(0, self.evaluator.evaluate(board, is_black));
         }
 
+        let key = search_key(board, is_black, false);
+        let mut preferred_move = self
+            .transposition_table
+            .get(&key)
+            .map(|entry| entry.best_move);
+        let alpha_orig = alpha;
+        let beta_orig = beta;
+        let mut alpha = alpha;
+        let mut beta = beta;
+
+        if let Some(entry) = self.transposition_table.get(&key).copied()
+            && entry.depth >= depth
+        {
+            match entry.bound {
+                Bound::Exact => return SearchResult::Complete(entry.best_move, entry.score),
+                Bound::Lower => alpha = alpha.max(entry.score),
+                Bound::Upper => beta = beta.min(entry.score),
+            }
+
+            if alpha >= beta {
+                return SearchResult::Complete(entry.best_move, entry.score);
+            }
+        }
+
         let legal = board.legal_moves(is_black);
         if legal == 0 {
             let opp_legal = board.legal_moves(!is_black);
@@ -130,10 +182,10 @@ impl<'a> Searcher<'a> {
                 .negate();
         }
 
-        let moves = bitboard_to_sorted_moves(legal, board, is_black, self.evaluator);
+        let moves =
+            bitboard_to_sorted_moves(legal, board, is_black, self.evaluator, preferred_move);
         let mut best_move = moves[0];
         let mut best_score = MIN_SCORE;
-        let mut alpha = alpha;
 
         for mv in moves {
             let mut next = *board;
@@ -157,6 +209,18 @@ impl<'a> Searcher<'a> {
                 }
             }
         }
+
+        let bound = classify_bound(best_score, alpha_orig, beta_orig);
+        preferred_move = Some(best_move);
+        self.transposition_table.insert(
+            key,
+            TranspositionEntry {
+                depth,
+                best_move: preferred_move.expect("best move must exist for legal position"),
+                score: best_score,
+                bound,
+            },
+        );
 
         SearchResult::Complete(best_move, best_score)
     }
@@ -201,6 +265,30 @@ impl<'a> Searcher<'a> {
             return SearchResult::Complete(0, exact_score(board, is_black));
         }
 
+        let key = search_key(board, is_black, true);
+        let mut preferred_move = self
+            .transposition_table
+            .get(&key)
+            .map(|entry| entry.best_move);
+        let alpha_orig = alpha;
+        let beta_orig = beta;
+        let mut alpha = alpha;
+        let mut beta = beta;
+
+        if let Some(entry) = self.transposition_table.get(&key).copied()
+            && entry.depth >= empties
+        {
+            match entry.bound {
+                Bound::Exact => return SearchResult::Complete(entry.best_move, entry.score),
+                Bound::Lower => alpha = alpha.max(entry.score),
+                Bound::Upper => beta = beta.min(entry.score),
+            }
+
+            if alpha >= beta {
+                return SearchResult::Complete(entry.best_move, entry.score);
+            }
+        }
+
         let legal = board.legal_moves(is_black);
         if legal == 0 {
             let opp_legal = board.legal_moves(!is_black);
@@ -212,10 +300,10 @@ impl<'a> Searcher<'a> {
                 .negate();
         }
 
-        let moves = bitboard_to_sorted_moves(legal, board, is_black, self.evaluator);
+        let moves =
+            bitboard_to_sorted_moves(legal, board, is_black, self.evaluator, preferred_move);
         let mut best_move = moves[0];
         let mut best_score = MIN_SCORE;
-        let mut alpha = alpha;
 
         for mv in moves {
             let mut next = *board;
@@ -240,6 +328,18 @@ impl<'a> Searcher<'a> {
             }
         }
 
+        let bound = classify_bound(best_score, alpha_orig, beta_orig);
+        preferred_move = Some(best_move);
+        self.transposition_table.insert(
+            key,
+            TranspositionEntry {
+                depth: empties,
+                best_move: preferred_move.expect("best move must exist for legal position"),
+                score: best_score,
+                bound,
+            },
+        );
+
         SearchResult::Complete(best_move, best_score)
     }
 }
@@ -263,6 +363,26 @@ fn exact_score(board: &Board, is_black: bool) -> f32 {
     }
 }
 
+fn search_key(board: &Board, is_black: bool, exact: bool) -> SearchKey {
+    let (black, white) = board.bitboards();
+    SearchKey {
+        black,
+        white,
+        is_black,
+        exact,
+    }
+}
+
+fn classify_bound(score: f32, alpha_orig: f32, beta_orig: f32) -> Bound {
+    if score <= alpha_orig {
+        Bound::Upper
+    } else if score >= beta_orig {
+        Bound::Lower
+    } else {
+        Bound::Exact
+    }
+}
+
 fn bitboard_to_positions(mut mask: u64) -> Vec<usize> {
     let mut out = Vec::new();
     while mask != 0 {
@@ -278,6 +398,7 @@ fn bitboard_to_sorted_moves(
     board: &Board,
     is_black: bool,
     evaluator: &NTupleEvaluator,
+    preferred_move: Option<usize>,
 ) -> Vec<usize> {
     let mut scored_moves: Vec<(usize, f32)> = bitboard_to_positions(legal)
         .into_iter()
@@ -291,8 +412,12 @@ fn bitboard_to_sorted_moves(
         .collect();
 
     scored_moves.sort_by(|(left_mv, left_score), (right_mv, right_score)| {
-        right_score
-            .total_cmp(left_score)
+        let left_preferred = Some(*left_mv) == preferred_move;
+        let right_preferred = Some(*right_mv) == preferred_move;
+
+        right_preferred
+            .cmp(&left_preferred)
+            .then_with(|| right_score.total_cmp(left_score))
             .then_with(|| left_mv.cmp(right_mv))
     });
 
@@ -443,5 +568,17 @@ mod tests {
 
         assert_eq!(result, SearchResult::TimedOut);
         assert!(searcher.timed_out());
+    }
+
+    #[test]
+    fn preferred_move_is_sorted_first_even_when_scores_tie() {
+        let evaluator = build_constant_evaluator();
+        let board = Board::new();
+        let legal = board.legal_moves(true);
+
+        let moves = bitboard_to_sorted_moves(legal, &board, true, &evaluator, Some(44));
+
+        assert_eq!(moves[0], 44);
+        assert_eq!(moves, vec![44, 19, 26, 37]);
     }
 }

@@ -305,6 +305,10 @@ fn negaalpha(
         return SearchResult::TimedOut;
     }
 
+    // Transposition Table を参照し、
+    // 十分な深さのエントリは bound として再利用する。
+    // 深さ不足でも best_move は手順序付けに使う。
+    //
     // 深度0: 評価関数で葉ノード評価
     if depth == 0 {
         return SearchResult::Complete(
@@ -326,7 +330,11 @@ fn negaalpha(
         return result.negate();
     }
 
-    // 合法手をソート（評価値順。同評価値はインデックス昇順で安定ソート）
+    // 合法手をソート
+    // 優先順位:
+    //   1. 前反復 / TT 由来の best_move
+    //   2. 評価値順
+    //   3. 同評価値はインデックス昇順で安定ソート
     let mut moves = bitboard_to_sorted_moves(legal, board, is_black, self.evaluator);
 
     let mut best_move = moves[0];
@@ -664,6 +672,8 @@ class TDLambdaTrainer:
                 continue
 
             # ε-greedy で手を選択
+            # exploitation 側は 1手 greedy ではなく、
+            # 浅い Negamax（既定 depth=2）で応手まで読んで着手を決める
             move = self._select_move(board, is_black, legal)
             history.append((board.copy(), is_black))
             board.place(move, is_black)

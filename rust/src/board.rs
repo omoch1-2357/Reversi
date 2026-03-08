@@ -101,7 +101,6 @@ impl Board {
         board
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn bitboards(&self) -> (u64, u64) {
         (self.black, self.white)
     }
