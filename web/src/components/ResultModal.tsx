@@ -1,3 +1,4 @@
+import { RESULT_DIALOG_NAME } from '../constants/accessibility'
 import styles from '../styles/ResultModal.module.css'
 import { PLAYER_BLACK, PLAYER_WHITE, type Winner } from '../types/player'
 
@@ -34,7 +35,12 @@ function ResultModal({
 
   return (
     <div className={styles.overlay}>
-      <section className={styles.modal} role="dialog" aria-modal="true" aria-label="Game result">
+      <section
+        className={styles.modal}
+        role="dialog"
+        aria-modal="true"
+        aria-label={RESULT_DIALOG_NAME}
+      >
         <p className={styles['modal__eyebrow']}>Final result</p>
         <h2 className={styles['modal__title']}>{getResultMessage(winner)}</h2>
         <p className={styles['modal__score']}>

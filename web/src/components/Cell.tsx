@@ -1,4 +1,5 @@
 import styles from '../styles/Cell.module.css'
+import { getCellAriaLabel } from '../constants/accessibility'
 
 export interface CellProps {
   value: number
@@ -21,7 +22,7 @@ function Cell({ value, row, col, isLegal, isFlipped, onClick }: CellProps) {
     .filter(Boolean)
     .join(' ')
 
-  const label = `Cell ${row + 1}-${col + 1}${isLegal ? ' legal move' : ''}`
+  const label = getCellAriaLabel(row, col, isLegal)
 
   return (
     <button

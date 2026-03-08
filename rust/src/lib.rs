@@ -162,12 +162,14 @@ fn to_js_value<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
 
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
-    use wasm_bindgen_test::wasm_bindgen_test;
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
     use super::*;
     use crate::ai::ntuple::NTupleEvaluator;
     use crate::game::GameInstance;
     use crate::types::{GameState, Position};
+
+    wasm_bindgen_test_configure!(run_in_browser);
 
     const MAX_GAME_STEPS: usize = 200;
     const AI_MOVE_LIMIT_MS: f64 = 3_000.0;
@@ -181,6 +183,11 @@ mod tests {
     const T12_BLACK: u64 = 0x7a0e_123f_4981_0101;
     const T12_WHITE: u64 = 0x01f1_6d40_161e_0e1e;
     const T12_WHITE_LEGAL_MASK: u64 = 0x0400_0000_2040_0000;
+    const AI_MOVE_TIMEOUT_MS: f64 = 5_000.0;
+    const PERFORMANCE_SAMPLE_COUNT: usize = 100;
+    const PERFORMANCE_WARMUP_COUNT: usize = 5;
+    const PERFORMANCE_MOVE_MIN: usize = 20;
+    const PERFORMANCE_MOVE_MAX: usize = 40;
 
     #[wasm_bindgen_test]
     fn api_flow_init_place_ai_get_result_works_end_to_end() {
@@ -241,6 +248,38 @@ mod tests {
             assert!(
                 elapsed_ms < AI_MOVE_LIMIT_MS,
                 "ai_move exceeded 3s target at level {level}: {elapsed_ms} ms"
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
+    #[ignore]
+    fn ai_move_p95_meets_requirement_for_seeded_midgame_positions() {
+        let positions = generate_seeded_midgame_positions(PERFORMANCE_SAMPLE_COUNT, 42);
+
+        for sample in positions.iter().take(PERFORMANCE_WARMUP_COUNT) {
+            let elapsed_ms = measure_ai_move_from_position(1, *sample);
+            assert!(
+                elapsed_ms < AI_MOVE_TIMEOUT_MS,
+                "warm-up ai_move exceeded 5s timeout guard: {elapsed_ms} ms"
+            );
+        }
+
+        for level in MIN_LEVEL..=MAX_LEVEL {
+            let mut durations_ms = Vec::with_capacity(PERFORMANCE_SAMPLE_COUNT);
+            for sample in &positions {
+                let elapsed_ms = measure_ai_move_from_position(level, *sample);
+                assert!(
+                    elapsed_ms < AI_MOVE_TIMEOUT_MS,
+                    "ai_move exceeded 5s timeout guard at level {level}: {elapsed_ms} ms"
+                );
+                durations_ms.push(elapsed_ms);
+            }
+
+            let p95_ms = percentile_95(&durations_ms);
+            assert!(
+                p95_ms < AI_MOVE_LIMIT_MS,
+                "level {level} p95 exceeded 3s target: {p95_ms} ms"
             );
         }
     }
@@ -360,11 +399,104 @@ mod tests {
         placed_white_index(&before, &after).expect("exactly one white stone should be newly placed")
     }
 
+    fn measure_ai_move_from_position(level: u8, sample: PerformanceSample) -> f64 {
+        inject_test_board(level, sample.board, sample.current_player);
+        let start_ms = js_sys::Date::now();
+        ai_move().expect("ai_move must succeed for generated performance position");
+        js_sys::Date::now() - start_ms
+    }
+
+    fn generate_seeded_midgame_positions(sample_count: usize, seed: u64) -> Vec<PerformanceSample> {
+        let mut rng = Lcg::new(seed);
+        let mut positions = Vec::with_capacity(sample_count);
+
+        for game_index in 0..sample_count {
+            let sample = generate_seeded_midgame_position(&mut rng).unwrap_or_else(|| {
+                panic!(
+                    "random play game {game_index} did not yield a white-to-move position within plies {PERFORMANCE_MOVE_MIN}..={PERFORMANCE_MOVE_MAX}"
+                )
+            });
+            positions.push(sample);
+        }
+
+        positions
+    }
+
+    fn generate_seeded_midgame_position(rng: &mut Lcg) -> Option<PerformanceSample> {
+        let mut board = Board::new();
+        let mut current_player = PLAYER_BLACK;
+        let mut plies = 0usize;
+        let mut candidates = Vec::new();
+
+        for _ in 0..MAX_GAME_STEPS {
+            let legal = board.legal_moves(current_player == PLAYER_BLACK);
+            if legal == 0 {
+                let opponent = opposing_player(current_player);
+                if board.legal_moves(opponent == PLAYER_BLACK) == 0 {
+                    break;
+                }
+                current_player = opponent;
+                maybe_collect_performance_sample(&mut candidates, board, current_player, plies);
+                continue;
+            }
+
+            let legal_moves = bitboard_to_positions(legal);
+            let mv = legal_moves[rng.next_usize(legal_moves.len())];
+            let flips = board.place(mv, current_player == PLAYER_BLACK);
+            assert_ne!(flips, 0, "generated random move must stay legal");
+
+            plies += 1;
+            current_player = opposing_player(current_player);
+            maybe_collect_performance_sample(&mut candidates, board, current_player, plies);
+
+            if board.legal_moves(current_player == PLAYER_BLACK) == 0 {
+                let opponent = opposing_player(current_player);
+                if board.legal_moves(opponent == PLAYER_BLACK) == 0 {
+                    break;
+                }
+                current_player = opponent;
+                maybe_collect_performance_sample(&mut candidates, board, current_player, plies);
+            }
+        }
+
+        if candidates.is_empty() {
+            None
+        } else {
+            Some(candidates[rng.next_usize(candidates.len())])
+        }
+    }
+
+    fn maybe_collect_performance_sample(
+        candidates: &mut Vec<PerformanceSample>,
+        board: Board,
+        current_player: u8,
+        plies: usize,
+    ) {
+        if !(PERFORMANCE_MOVE_MIN..=PERFORMANCE_MOVE_MAX).contains(&plies) {
+            return;
+        }
+        if current_player != PLAYER_WHITE {
+            return;
+        }
+        if board.legal_moves(false) == 0 {
+            return;
+        }
+
+        candidates.push(PerformanceSample {
+            board,
+            current_player,
+        });
+    }
+
     fn inject_test_position(level: u8, black: u64, white: u64, current_player: u8) {
+        inject_test_board(level, Board::from_bitboards(black, white), current_player);
+    }
+
+    fn inject_test_board(level: u8, board: Board, current_player: u8) {
         let evaluator = NTupleEvaluator::from_bytes(MODEL_BYTES)
             .expect("embedded model bytes must deserialize for wasm tests");
         let mut game = GameInstance::new(level, Box::new(SearchMoveSelector::new(evaluator)));
-        game.set_board_for_test(Board::from_bitboards(black, white), current_player);
+        game.set_board_for_test(board, current_player);
         let mut guard = GAME.lock().expect("game lock must not be poisoned");
         *guard = Some(game);
     }
@@ -453,6 +585,36 @@ mod tests {
     }
 
     #[derive(Debug, Clone, Copy)]
+    struct PerformanceSample {
+        board: Board,
+        current_player: u8,
+    }
+
+    // Simple test-only LCG for deterministic position sampling. `next_usize`
+    // uses modulo reduction, which can bias distribution, but that is
+    // acceptable for the small upper bounds used in these tests. Do not use
+    // this RNG for production or cryptographic code.
+    struct Lcg {
+        state: u64,
+    }
+
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Self { state: seed }
+        }
+
+        fn next_u32(&mut self) -> u32 {
+            self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (self.state >> 32) as u32
+        }
+
+        fn next_usize(&mut self, upper_bound: usize) -> usize {
+            assert!(upper_bound > 0, "upper_bound must be positive");
+            (self.next_u32() as usize) % upper_bound
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
     struct TieBreakResult {
         chosen_index: usize,
         expected_index: usize,
@@ -516,6 +678,39 @@ mod tests {
 
     fn position_to_index(pos: &Position) -> usize {
         (pos.row as usize) * 8 + pos.col as usize
+    }
+
+    fn percentile_95(samples: &[f64]) -> f64 {
+        assert!(!samples.is_empty(), "samples must not be empty");
+
+        let mut sorted = samples.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let rank = sorted
+            .len()
+            .saturating_mul(95)
+            .div_ceil(100)
+            .saturating_sub(1);
+        sorted[rank]
+    }
+
+    fn bitboard_to_positions(mut mask: u64) -> Vec<usize> {
+        let mut positions = Vec::new();
+
+        while mask != 0 {
+            let pos = mask.trailing_zeros() as usize;
+            positions.push(pos);
+            mask &= mask - 1;
+        }
+
+        positions
+    }
+
+    fn opposing_player(player: u8) -> u8 {
+        if player == PLAYER_BLACK {
+            PLAYER_WHITE
+        } else {
+            PLAYER_BLACK
+        }
     }
 
     fn placed_white_index(before: &[u8], after: &[u8]) -> Option<usize> {

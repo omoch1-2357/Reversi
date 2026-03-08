@@ -1,4 +1,5 @@
 import styles from '../styles/GameInfo.module.css'
+import { PLAYER_TURN_TEXT } from '../constants/accessibility'
 import { PLAYER_BLACK, PLAYER_WHITE, type Player } from '../types/player'
 
 interface GameInfoProps {
@@ -15,7 +16,7 @@ const getTurnLabel = (currentPlayer: Player, isGameOver: boolean): string => {
     return 'Game over'
   }
   return currentPlayer === PLAYER_BLACK
-    ? 'Your turn (Black)'
+    ? PLAYER_TURN_TEXT
     : currentPlayer === PLAYER_WHITE
       ? 'AI turn (White)'
       : 'Unknown turn'
