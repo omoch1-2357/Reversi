@@ -72,7 +72,7 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
             f"model payload too short: expected at least {HEADER_SIZE} bytes, got {len(payload)}"
         )
 
-    magic, version, num_tuples, expected_crc32, reserved = struct.unpack(
+    magic, version, num_tuples, expected_crc32, phase_count = struct.unpack(
         "<4sIIII", payload[:HEADER_SIZE]
     )
     if magic != MAGIC:
@@ -83,8 +83,10 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
         raise ValueError(
             f"num_tuples mismatch: expected {len(tuple_patterns)}, got {num_tuples}"
         )
-    if reserved != 0:
-        raise ValueError(f"reserved must be 0, got {reserved}")
+    if phase_count != NTupleNetwork.PHASE_COUNT:
+        raise ValueError(
+            f"phase_count mismatch: expected {NTupleNetwork.PHASE_COUNT}, got {phase_count}"
+        )
 
     data = payload[HEADER_SIZE:]
     actual_crc32 = zlib.crc32(data) & 0xFFFFFFFF
@@ -118,16 +120,19 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
             )
         offset = end
 
-    for idx, pattern in enumerate(tuple_patterns):
-        weight_count = 3 ** len(pattern)
-        required = weight_count * 4
-        end = offset + required
-        if end > len(data):
-            raise ValueError(f"weights truncated at tuple index {idx}")
+    for phase_idx in range(phase_count):
+        for tuple_idx, pattern in enumerate(tuple_patterns):
+            weight_count = 3 ** len(pattern)
+            required = weight_count * 4
+            end = offset + required
+            if end > len(data):
+                raise ValueError(
+                    f"weights truncated at phase {phase_idx}, tuple index {tuple_idx}"
+                )
 
-        for weight_offset in range(offset, end, 4):
-            _ = struct.unpack_from("<f", data, weight_offset)
-        offset = end
+            for weight_offset in range(offset, end, 4):
+                _ = struct.unpack_from("<f", data, weight_offset)
+            offset = end
 
     if offset != len(data):
         raise ValueError(

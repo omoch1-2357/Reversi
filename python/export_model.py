@@ -9,13 +9,15 @@ import zlib
 from ntuple import NTupleNetwork
 
 MAGIC = b"NTRV"
-VERSION = 1
+VERSION = 2
 HEADER_SIZE = 20
 
 
 def _build_data_section(ntuple: NTupleNetwork) -> bytes:
-    if len(ntuple.weights) != len(ntuple.TUPLE_PATTERNS):
-        raise ValueError("weights length must match TUPLE_PATTERNS length")
+    if len(ntuple.weights) != ntuple.PHASE_COUNT:
+        raise ValueError(
+            f"weights phase length must be {ntuple.PHASE_COUNT}, got {len(ntuple.weights)}"
+        )
 
     data = bytearray()
 
@@ -31,14 +33,20 @@ def _build_data_section(ntuple: NTupleNetwork) -> bytes:
         data.append(len(pattern))
         data.extend(bytes(pattern))
 
-    for idx, weights in enumerate(ntuple.weights):
-        expected_len = 3 ** len(ntuple.TUPLE_PATTERNS[idx])
-        if len(weights) != expected_len:
+    for phase_idx, phase_weights in enumerate(ntuple.weights):
+        if len(phase_weights) != len(ntuple.TUPLE_PATTERNS):
             raise ValueError(
-                f"weights[{idx}] length must be {expected_len}, got {len(weights)}"
+                f"weights[{phase_idx}] tuple length must match TUPLE_PATTERNS length"
             )
-        for weight in weights:
-            data.extend(struct.pack("<f", float(weight)))
+        for tuple_idx, weights in enumerate(phase_weights):
+            expected_len = 3 ** len(ntuple.TUPLE_PATTERNS[tuple_idx])
+            if len(weights) != expected_len:
+                raise ValueError(
+                    f"weights[{phase_idx}][{tuple_idx}] length must be "
+                    f"{expected_len}, got {len(weights)}"
+                )
+            for weight in weights:
+                data.extend(struct.pack("<f", float(weight)))
 
     return bytes(data)
 
@@ -56,7 +64,7 @@ def export_model(ntuple: NTupleNetwork, path: str | Path) -> None:
         VERSION,
         len(ntuple.TUPLE_PATTERNS),
         data_crc32,
-        0,
+        ntuple.PHASE_COUNT,
     )
     if len(packed_header) != struct.calcsize(header_format):
         raise ValueError("packed header size mismatch")

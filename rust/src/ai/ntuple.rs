@@ -1,7 +1,8 @@
 use crate::board::Board;
 
 const MAGIC: &[u8; 4] = b"NTRV";
-const VERSION: u32 = 1;
+const VERSION_V1: u32 = 1;
+const VERSION_V2: u32 = 2;
 const HEADER_SIZE: usize = 20;
 const BOARD_SIZE: usize = 8;
 const BOARD_CELLS: usize = BOARD_SIZE * BOARD_SIZE;
@@ -10,7 +11,8 @@ const BOARD_CELLS: usize = BOARD_SIZE * BOARD_SIZE;
 #[derive(Debug, Clone)]
 pub struct NTupleEvaluator {
     tuples: Vec<Vec<u8>>,
-    weights: Vec<Vec<f32>>,
+    phase_count: usize,
+    weights: Vec<Vec<Vec<f32>>>,
 }
 
 impl NTupleEvaluator {
@@ -28,14 +30,23 @@ impl NTupleEvaluator {
         }
 
         let version = read_u32_le(data, 4)?;
-        if version != VERSION {
-            return Err(format!(
-                "unsupported weights version: expected {VERSION}, got {version}"
-            ));
-        }
-
         let num_tuples = read_u32_le(data, 8)? as usize;
         let expected_crc = read_u32_le(data, 12)?;
+        let phase_count = match version {
+            VERSION_V1 => 1,
+            VERSION_V2 => {
+                let count = read_u32_le(data, 16)? as usize;
+                if count == 0 {
+                    return Err("phase_count must be greater than 0".to_string());
+                }
+                count
+            }
+            _ => {
+                return Err(format!(
+                    "unsupported weights version: expected {VERSION_V1} or {VERSION_V2}, got {version}"
+                ));
+            }
+        };
         let payload = &data[HEADER_SIZE..];
 
         let actual_crc = crc32fast::hash(payload);
@@ -73,45 +84,55 @@ impl NTupleEvaluator {
             tuples.push(tuple);
         }
 
-        let mut weights = Vec::with_capacity(num_tuples);
-        for (tuple_idx, tuple) in tuples.iter().enumerate() {
-            let entries = pow3(tuple.len())?;
-            let bytes_len = entries
-                .checked_mul(4)
-                .ok_or_else(|| "weights byte length overflow".to_string())?;
+        let mut weights = Vec::with_capacity(phase_count);
+        for phase_idx in 0..phase_count {
+            let mut phase_weights = Vec::with_capacity(num_tuples);
+            for (tuple_idx, tuple) in tuples.iter().enumerate() {
+                let entries = pow3(tuple.len())?;
+                let bytes_len = entries
+                    .checked_mul(4)
+                    .ok_or_else(|| "weights byte length overflow".to_string())?;
 
-            if offset + bytes_len > payload.len() {
-                return Err(format!(
-                    "unexpected EOF while reading weights for tuple #{tuple_idx}"
-                ));
+                if offset + bytes_len > payload.len() {
+                    return Err(format!(
+                        "unexpected EOF while reading weights for phase #{phase_idx}, tuple #{tuple_idx}"
+                    ));
+                }
+
+                let mut tuple_weights = Vec::with_capacity(entries);
+                for i in 0..entries {
+                    let start = offset + i * 4;
+                    let mut chunk = [0u8; 4];
+                    chunk.copy_from_slice(&payload[start..start + 4]);
+                    tuple_weights.push(f32::from_le_bytes(chunk));
+                }
+
+                offset += bytes_len;
+                phase_weights.push(tuple_weights);
             }
-
-            let mut tuple_weights = Vec::with_capacity(entries);
-            for i in 0..entries {
-                let start = offset + i * 4;
-                let mut chunk = [0u8; 4];
-                chunk.copy_from_slice(&payload[start..start + 4]);
-                tuple_weights.push(f32::from_le_bytes(chunk));
-            }
-
-            offset += bytes_len;
-            weights.push(tuple_weights);
+            weights.push(phase_weights);
         }
 
         if offset != payload.len() {
             return Err("weights payload has trailing bytes".to_string());
         }
 
-        Ok(Self { tuples, weights })
+        Ok(Self {
+            tuples,
+            phase_count,
+            weights,
+        })
     }
 
     /// Evaluate from the side-to-move perspective.
     pub fn evaluate(&self, board: &Board, is_black: bool) -> f32 {
         let cells = board.to_array();
+        let phase_idx = phase_index_for_board(board, self.phase_count);
+        let phase_weights = &self.weights[phase_idx];
         let mut score = 0.0f32;
 
         for rotation in 0..4u8 {
-            for (tuple, weights) in self.tuples.iter().zip(self.weights.iter()) {
+            for (tuple, weights) in self.tuples.iter().zip(phase_weights.iter()) {
                 let idx = tuple.iter().fold(0usize, |acc, &pos| {
                     let rotated = rotate_pos(pos, rotation);
                     let value = map_to_player_view(cells[rotated], is_black) as usize;
@@ -123,6 +144,11 @@ impl NTupleEvaluator {
 
         score
     }
+}
+
+fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
+    let plies = 60usize.saturating_sub(board.empty_count() as usize);
+    (plies / 2).min(phase_count.saturating_sub(1))
 }
 
 fn rotate_pos(pos: u8, rotation: u8) -> usize {
@@ -171,27 +197,56 @@ fn pow3(exp: usize) -> Result<usize, String> {
 mod tests {
     use super::*;
 
-    fn build_weights_blob(tuples: &[Vec<u8>], weights: &[Vec<f32>]) -> Vec<u8> {
-        assert_eq!(tuples.len(), weights.len());
+    fn build_weights_blob_v1(tuples: &[Vec<u8>], weights: &[Vec<f32>]) -> Vec<u8> {
+        let phase_weights = vec![weights.to_vec()];
+        build_weights_blob(VERSION_V1, tuples, &phase_weights, 0)
+    }
+
+    fn build_weights_blob_v2(
+        tuples: &[Vec<u8>],
+        phase_weights: &[Vec<Vec<f32>>],
+        phase_count: u32,
+    ) -> Vec<u8> {
+        build_weights_blob(VERSION_V2, tuples, phase_weights, phase_count)
+    }
+
+    fn build_weights_blob(
+        version: u32,
+        tuples: &[Vec<u8>],
+        phase_weights: &[Vec<Vec<f32>>],
+        phase_count: u32,
+    ) -> Vec<u8> {
+        let expected_phases = if version == VERSION_V1 {
+            1usize
+        } else {
+            phase_count as usize
+        };
+        assert_eq!(phase_weights.len(), expected_phases);
+        assert!(expected_phases > 0);
+        for weights in phase_weights {
+            assert_eq!(tuples.len(), weights.len());
+        }
 
         let mut payload = Vec::new();
         for tuple in tuples {
             payload.push(tuple.len() as u8);
             payload.extend_from_slice(tuple);
         }
-        for w in weights {
-            for value in w {
-                payload.extend_from_slice(&value.to_le_bytes());
+        for weights in phase_weights {
+            for tuple_weights in weights {
+                for value in tuple_weights {
+                    payload.extend_from_slice(&value.to_le_bytes());
+                }
             }
         }
 
         let crc = crc32fast::hash(&payload);
         let mut out = Vec::new();
         out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&VERSION.to_le_bytes());
+        out.extend_from_slice(&version.to_le_bytes());
         out.extend_from_slice(&(tuples.len() as u32).to_le_bytes());
         out.extend_from_slice(&crc.to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&phase_count.to_le_bytes());
         out.extend_from_slice(&payload);
         out
     }
@@ -200,26 +255,66 @@ mod tests {
         1u64 << pos
     }
 
+    fn board_with_empty_count(empty: u8) -> Board {
+        let occupied = BOARD_CELLS - empty as usize;
+        let mut black = bit(0) | bit(7) | bit(56) | bit(63);
+        let mut pos = 1usize;
+
+        while (black.count_ones() as usize) < occupied {
+            if pos < BOARD_CELLS {
+                let square = bit(pos);
+                if (black & square) == 0 {
+                    black |= square;
+                }
+                pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        Board::from_bitboards(black, 0)
+    }
+
     #[test]
-    fn from_bytes_deserializes_tuple_defs_and_weights() {
+    fn from_bytes_deserializes_v2_tuple_defs_and_weights() {
         let tuples = vec![vec![0, 1], vec![63]];
-        let weights = vec![
-            vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
-            vec![-1.0, 2.0, 0.25],
+        let phase_weights = vec![
+            vec![
+                vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+                vec![-1.0, 2.0, 0.25],
+            ],
+            vec![
+                vec![10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0],
+                vec![3.0, 4.0, 5.0],
+            ],
         ];
-        let bytes = build_weights_blob(&tuples, &weights);
+        let bytes = build_weights_blob_v2(&tuples, &phase_weights, 2);
 
         let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
 
         assert_eq!(evaluator.tuples, tuples);
-        assert_eq!(evaluator.weights, weights);
+        assert_eq!(evaluator.phase_count, 2);
+        assert_eq!(evaluator.weights, phase_weights);
+    }
+
+    #[test]
+    fn from_bytes_normalizes_v1_to_single_phase() {
+        let tuples = vec![vec![0]];
+        let weights = vec![vec![0.0, 1.0, -1.0]];
+        let bytes = build_weights_blob_v1(&tuples, &weights);
+
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+
+        assert_eq!(evaluator.tuples, tuples);
+        assert_eq!(evaluator.phase_count, 1);
+        assert_eq!(evaluator.weights, vec![weights]);
     }
 
     #[test]
     fn from_bytes_rejects_invalid_magic() {
         let tuples = vec![vec![0]];
         let weights = vec![vec![0.0, 1.0, -1.0]];
-        let mut bytes = build_weights_blob(&tuples, &weights);
+        let mut bytes = build_weights_blob_v1(&tuples, &weights);
         bytes[0] = b'X';
 
         let err = NTupleEvaluator::from_bytes(&bytes).unwrap_err();
@@ -229,9 +324,9 @@ mod tests {
     #[test]
     fn from_bytes_rejects_unsupported_version() {
         let tuples = vec![vec![0]];
-        let weights = vec![vec![0.0, 1.0, -1.0]];
-        let mut bytes = build_weights_blob(&tuples, &weights);
-        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
+        let weights = vec![vec![vec![0.0, 1.0, -1.0]]];
+        let mut bytes = build_weights_blob(99, &tuples, &weights, 1);
+        bytes[4..8].copy_from_slice(&99u32.to_le_bytes());
 
         let err = NTupleEvaluator::from_bytes(&bytes).unwrap_err();
         assert!(err.contains("version"));
@@ -240,8 +335,8 @@ mod tests {
     #[test]
     fn from_bytes_rejects_crc_mismatch() {
         let tuples = vec![vec![0]];
-        let weights = vec![vec![0.0, 1.0, -1.0]];
-        let mut bytes = build_weights_blob(&tuples, &weights);
+        let weights = vec![vec![vec![0.0, 1.0, -1.0]]];
+        let mut bytes = build_weights_blob_v2(&tuples, &weights, 1);
         let last = bytes.len() - 1;
         bytes[last] ^= 0x01;
 
@@ -250,10 +345,21 @@ mod tests {
     }
 
     #[test]
+    fn from_bytes_rejects_zero_phase_count_for_v2() {
+        let tuples = vec![vec![0]];
+        let weights = vec![vec![vec![0.0, 1.0, -1.0]]];
+        let mut bytes = build_weights_blob(VERSION_V2, &tuples, &weights, 1);
+        bytes[16..20].copy_from_slice(&0u32.to_le_bytes());
+
+        let err = NTupleEvaluator::from_bytes(&bytes).unwrap_err();
+        assert!(err.contains("phase_count"));
+    }
+
+    #[test]
     fn from_bytes_rejects_truncated_weights_payload() {
         let tuples = vec![vec![0, 1]];
-        let weights = vec![vec![0.0; 9]];
-        let mut bytes = build_weights_blob(&tuples, &weights);
+        let weights = vec![vec![vec![0.0; 9]], vec![vec![1.0; 9]]];
+        let mut bytes = build_weights_blob_v2(&tuples, &weights, 2);
         bytes.pop();
         let recalculated_crc = crc32fast::hash(&bytes[HEADER_SIZE..]);
         bytes[12..16].copy_from_slice(&recalculated_crc.to_le_bytes());
@@ -266,7 +372,7 @@ mod tests {
     fn evaluate_applies_rotation_symmetry_and_player_view() {
         let tuples = vec![vec![0]];
         let weights = vec![vec![0.0, 1.0, -1.0]];
-        let bytes = build_weights_blob(&tuples, &weights);
+        let bytes = build_weights_blob_v1(&tuples, &weights);
         let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
 
         let black = bit(0) | bit(7) | bit(56) | bit(63);
@@ -277,5 +383,30 @@ mod tests {
 
         assert_eq!(black_score, 4.0);
         assert_eq!(white_score, -4.0);
+    }
+
+    #[test]
+    fn evaluate_selects_weights_for_current_phase() {
+        let tuples = vec![vec![0]];
+        let phase_weights = vec![vec![vec![0.0, 1.0, 0.0]], vec![vec![0.0, 2.0, 0.0]]];
+        let bytes = build_weights_blob_v2(&tuples, &phase_weights, 2);
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+
+        let phase0_board = board_with_empty_count(60);
+        let phase1_board = board_with_empty_count(58);
+
+        assert_eq!(evaluator.evaluate(&phase0_board, true), 4.0);
+        assert_eq!(evaluator.evaluate(&phase1_board, true), 8.0);
+    }
+
+    #[test]
+    fn v1_weights_are_reused_for_all_later_phases() {
+        let tuples = vec![vec![0]];
+        let weights = vec![vec![0.0, 1.0, 0.0]];
+        let bytes = build_weights_blob_v1(&tuples, &weights);
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+        let late_board = board_with_empty_count(0);
+
+        assert_eq!(evaluator.evaluate(&late_board, true), 4.0);
     }
 }

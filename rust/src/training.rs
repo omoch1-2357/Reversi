@@ -27,10 +27,11 @@ pub const TUPLE_PATTERNS: &[&[u8]] = &[
 ];
 
 const MAGIC: &[u8; 4] = b"NTRV";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const ROTATION_COUNT: usize = 4;
 const TUPLE_COUNT: usize = 14;
 const MAX_TUPLE_LEN: usize = 10;
+pub const PHASE_COUNT: usize = 30;
 
 #[derive(Debug, Clone, Copy)]
 struct CompiledTuple {
@@ -90,28 +91,44 @@ pub trait TrainingNetwork {
 
 #[derive(Debug, Clone)]
 pub struct TrainableNTuple {
-    weights: Vec<Vec<f32>>,
+    phase_count: usize,
+    weights: Vec<Vec<Vec<f32>>>,
 }
 
 impl TrainableNTuple {
     pub fn new() -> Self {
-        let weights = TUPLE_PATTERNS
+        let template: Vec<Vec<f32>> = TUPLE_PATTERNS
             .iter()
             .map(|pattern| vec![0.0; pow3(pattern.len()).expect("tuple size must fit usize")])
             .collect();
-        Self { weights }
+        Self {
+            phase_count: PHASE_COUNT,
+            weights: vec![template; PHASE_COUNT],
+        }
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
-        if self.weights.len() != TUPLE_PATTERNS.len() {
-            return Err("weights length must match tuple patterns length".to_string());
+        if self.phase_count == 0 {
+            return Err("phase_count must be greater than 0".to_string());
+        }
+        if self.weights.len() != self.phase_count {
+            return Err(format!(
+                "weights phase length must match phase_count: expected {}, got {}",
+                self.phase_count,
+                self.weights.len()
+            ));
         }
 
         let tuple_defs_len: usize = TUPLE_PATTERNS.iter().map(|pattern| 1 + pattern.len()).sum();
         let weights_bytes: usize = self
             .weights
             .iter()
-            .map(|weights| weights.len() * std::mem::size_of::<f32>())
+            .map(|phase_weights| {
+                phase_weights
+                    .iter()
+                    .map(|weights| weights.len() * std::mem::size_of::<f32>())
+                    .sum::<usize>()
+            })
             .sum();
         let mut data = Vec::with_capacity(tuple_defs_len + weights_bytes);
 
@@ -120,16 +137,24 @@ impl TrainableNTuple {
             data.extend_from_slice(pattern);
         }
 
-        for (idx, weights) in self.weights.iter().enumerate() {
-            let expected_len = pow3(TUPLE_PATTERNS[idx].len())?;
-            if weights.len() != expected_len {
+        for (phase_idx, phase_weights) in self.weights.iter().enumerate() {
+            if phase_weights.len() != TUPLE_PATTERNS.len() {
                 return Err(format!(
-                    "weights[{idx}] length must be {expected_len}, got {}",
-                    weights.len()
+                    "weights[{phase_idx}] tuple length must match tuple patterns length"
                 ));
             }
-            for value in weights {
-                data.extend_from_slice(&value.to_le_bytes());
+
+            for (tuple_idx, weights) in phase_weights.iter().enumerate() {
+                let expected_len = pow3(TUPLE_PATTERNS[tuple_idx].len())?;
+                if weights.len() != expected_len {
+                    return Err(format!(
+                        "weights[{phase_idx}][{tuple_idx}] length must be {expected_len}, got {}",
+                        weights.len()
+                    ));
+                }
+                for value in weights {
+                    data.extend_from_slice(&value.to_le_bytes());
+                }
             }
         }
 
@@ -139,13 +164,17 @@ impl TrainableNTuple {
         output.extend_from_slice(&VERSION.to_le_bytes());
         output.extend_from_slice(&(TUPLE_PATTERNS.len() as u32).to_le_bytes());
         output.extend_from_slice(&crc32.to_le_bytes());
-        output.extend_from_slice(&0u32.to_le_bytes());
+        output.extend_from_slice(&(self.phase_count as u32).to_le_bytes());
         output.extend_from_slice(&data);
         Ok(output)
     }
 
-    pub fn raw_weights(&self) -> &[Vec<f32>] {
+    pub fn raw_weights(&self) -> &[Vec<Vec<f32>>] {
         &self.weights
+    }
+
+    fn phase_index(&self, board: &Board) -> usize {
+        phase_index_for_board(board, self.phase_count)
     }
 
     fn compute_feature_indices(
@@ -171,22 +200,33 @@ impl TrainableNTuple {
         indices
     }
 
-    fn sum_feature_indices(&self, indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT]) -> f32 {
+    fn sum_feature_indices(
+        &self,
+        phase_idx: usize,
+        indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT],
+    ) -> f32 {
         let mut score = 0.0f32;
+        let phase_weights = &self.weights[phase_idx];
 
         for tuple_indices in indices {
             for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
-                score += self.weights[tuple_idx][index];
+                score += phase_weights[tuple_idx][index];
             }
         }
 
         score
     }
 
-    fn apply_delta(&mut self, indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT], delta: f32) {
+    fn apply_delta(
+        &mut self,
+        phase_idx: usize,
+        indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT],
+        delta: f32,
+    ) {
+        let phase_weights = &mut self.weights[phase_idx];
         for tuple_indices in indices {
             for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
-                self.weights[tuple_idx][index] += delta;
+                phase_weights[tuple_idx][index] += delta;
             }
         }
     }
@@ -200,13 +240,15 @@ impl Default for TrainableNTuple {
 
 impl TrainingNetwork for TrainableNTuple {
     fn evaluate(&self, board: &Board, is_black: bool) -> f32 {
+        let phase_idx = self.phase_index(board);
         let indices = Self::compute_feature_indices(board, is_black);
-        self.sum_feature_indices(&indices)
+        self.sum_feature_indices(phase_idx, &indices)
     }
 
     fn update(&mut self, board: &Board, is_black: bool, delta: f32) {
+        let phase_idx = self.phase_index(board);
         let indices = Self::compute_feature_indices(board, is_black);
-        self.apply_delta(&indices, delta);
+        self.apply_delta(phase_idx, &indices, delta);
     }
 
     fn td_lambda_step(
@@ -219,8 +261,9 @@ impl TrainingNetwork for TrainableNTuple {
         alpha: f32,
         lambda_: f32,
     ) -> (f32, f32) {
+        let phase_idx = self.phase_index(board);
         let indices = Self::compute_feature_indices(board, is_black);
-        let current_value = self.sum_feature_indices(&indices);
+        let current_value = self.sum_feature_indices(phase_idx, &indices);
         let td_error = next_value - current_value;
         let next_cumulative_td = if let Some(previous_player) = next_player {
             let signed_lambda = if is_black == previous_player {
@@ -233,7 +276,7 @@ impl TrainingNetwork for TrainableNTuple {
             td_error
         };
 
-        self.apply_delta(&indices, alpha * next_cumulative_td);
+        self.apply_delta(phase_idx, &indices, alpha * next_cumulative_td);
         (current_value, next_cumulative_td)
     }
 }
@@ -432,6 +475,11 @@ fn nth_move_from_mask(mask: u64, target: u32) -> usize {
     }
 }
 
+fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
+    let plies = 60usize.saturating_sub(board.empty_count() as usize);
+    (plies / 2).min(phase_count.saturating_sub(1))
+}
+
 fn rotate_pos(pos: u8, rotation: u8) -> usize {
     const BOARD_SIZE: usize = 8;
     let row = (pos as usize) / BOARD_SIZE;
@@ -498,6 +546,16 @@ mod tests {
         }
     }
 
+    fn board_with_empty_count(empty: u8) -> Board {
+        let occupied = 64usize - empty as usize;
+        let black = if occupied == 64 {
+            u64::MAX
+        } else {
+            (1u64 << occupied) - 1
+        };
+        Board::from_bitboards(black, 0)
+    }
+
     #[test]
     fn update_direction_is_toward_td_target() {
         let network = RecordingNetwork {
@@ -549,6 +607,56 @@ mod tests {
     }
 
     #[test]
+    fn phase_index_uses_two_plies_per_phase() {
+        assert_eq!(phase_index_for_board(&Board::new(), PHASE_COUNT), 0);
+        assert_eq!(
+            phase_index_for_board(&board_with_empty_count(59), PHASE_COUNT),
+            0
+        );
+        assert_eq!(
+            phase_index_for_board(&board_with_empty_count(58), PHASE_COUNT),
+            1
+        );
+        assert_eq!(
+            phase_index_for_board(&board_with_empty_count(1), PHASE_COUNT),
+            29
+        );
+        assert_eq!(
+            phase_index_for_board(&board_with_empty_count(0), PHASE_COUNT),
+            29
+        );
+    }
+
+    #[test]
+    fn evaluate_reads_only_current_phase_weights() {
+        let mut network = TrainableNTuple::new();
+        let phase0_board = board_with_empty_count(60);
+        let phase1_board = board_with_empty_count(58);
+        let phase0_indices = TrainableNTuple::compute_feature_indices(&phase0_board, true);
+        let phase1_indices = TrainableNTuple::compute_feature_indices(&phase1_board, true);
+
+        for rotation in 0..ROTATION_COUNT {
+            network.weights[0][0][phase0_indices[rotation][0]] = 1.0;
+            network.weights[1][0][phase1_indices[rotation][0]] = 2.0;
+        }
+
+        assert_eq!(network.evaluate(&phase0_board, true), 4.0);
+        assert_eq!(network.evaluate(&phase1_board, true), 8.0);
+    }
+
+    #[test]
+    fn update_only_touches_active_phase() {
+        let mut network = TrainableNTuple::new();
+        let board = board_with_empty_count(58);
+        let indices = TrainableNTuple::compute_feature_indices(&board, true);
+
+        network.update(&board, true, 0.25);
+
+        assert_eq!(network.weights[0][0][indices[0][0]], 0.0);
+        assert!(network.weights[1][0][indices[0][0]] > 0.0);
+    }
+
+    #[test]
     fn play_one_game_is_reproducible_with_fixed_seed() {
         let mut trainer_a =
             TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026).unwrap();
@@ -562,13 +670,11 @@ mod tests {
             trainer_a.network.raw_weights(),
             trainer_b.network.raw_weights()
         );
-        assert!(
-            trainer_a
-                .network
-                .raw_weights()
+        assert!(trainer_a.network.raw_weights().iter().any(|phase| {
+            phase
                 .iter()
                 .any(|weights| weights.iter().any(|value| *value != 0.0))
-        );
+        }));
     }
 
     #[test]
@@ -588,6 +694,18 @@ mod tests {
         assert_eq!(updates[2].0, 5);
         assert!(updates.iter().all(|(_, total, _)| *total == 5));
         assert!(updates.iter().all(|(_, _, elapsed)| *elapsed >= 0.0));
+    }
+
+    #[test]
+    fn train_to_bytes_writes_v2_header_with_phase_count() {
+        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 0, None).unwrap();
+
+        assert_eq!(&bytes[0..4], MAGIC);
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), VERSION);
+        assert_eq!(
+            u32::from_le_bytes(bytes[16..20].try_into().unwrap()),
+            PHASE_COUNT as u32
+        );
     }
 
     #[test]

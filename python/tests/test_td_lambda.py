@@ -96,9 +96,14 @@ def test_play_one_game_is_reproducible_with_fixed_seed() -> None:
 
     assert all(
         np.array_equal(a, b)
-        for a, b in zip(ntuple_a.weights, ntuple_b.weights, strict=True)
+        for phase_a, phase_b in zip(ntuple_a.weights, ntuple_b.weights, strict=True)
+        for a, b in zip(phase_a, phase_b, strict=True)
     )
-    assert any(np.count_nonzero(w) > 0 for w in ntuple_a.weights)
+    assert any(
+        np.count_nonzero(weights) > 0
+        for phase_weights in ntuple_a.weights
+        for weights in phase_weights
+    )
 
 
 def test_train_reports_progress_at_interval_and_completion() -> None:
