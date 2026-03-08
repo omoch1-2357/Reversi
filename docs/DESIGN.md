@@ -518,19 +518,16 @@ pub struct GameResult {
 
 ```mermaid
 graph TD
-    TRAIN[train.py<br/>学習メイン] --> BOARD_PY[board.py<br/>盤面ロジック]
-    TRAIN --> NTUPLE_PY[ntuple.py<br/>N-Tuple Network]
-    TRAIN --> TD[td_lambda.py<br/>TD-Lambda学習]
-    TD --> NTUPLE_PY
-    TD --> BOARD_PY
-    TRAIN --> EXPORT[export_model.py<br/>モデルエクスポート]
-    EXPORT --> NTUPLE_PY
+    TRAIN[train.py<br/>Python CLI] --> PY_BRIDGE[rust_training.py<br/>拡張ローダ]
+    PY_BRIDGE --> PYO3[PyO3拡張<br/>rust_training_ext]
+    PYO3 --> RUST_TRAIN[training.rs<br/>自己対戦 + TD-Lambda]
+    RUST_TRAIN --> BIN[weights.bin<br/>CRC32付き]
 ```
 
-### 3.2 board.py: 盤面ロジック
+### 3.2 board.py / training.rs: 盤面ロジック
 
-Rustの `Board` と同等の機能をPythonで実装する。
-学習時の自己対戦で使用する。
+学習時の自己対戦は Rust の `training.rs` から `board.rs` を再利用して実行する。
+`board.py` は仕様参照用・互換用の実装として保持する。
 
 ```python
 class Board:
@@ -559,11 +556,11 @@ class Board:
         """深いコピーを返す"""
 ```
 
-### 3.3 ntuple.py: N-Tuple Network
+### 3.3 ntuple.py / training.rs: N-Tuple Network
 
 ```python
 class NTupleNetwork:
-    """N-Tuple Network 評価関数"""
+    """N-Tuple Network 評価関数（仕様参照用のPython実装）"""
 
     # 実際に使用するタプルパターン定義（想定パターン数: 14）
     TUPLE_PATTERNS: list[list[int]] = [
@@ -621,11 +618,11 @@ class NTupleNetwork:
         """回転4対称変換を返す（Rust側と同一の変換）"""
 ```
 
-### 3.4 td_lambda.py: TD-Lambda学習
+### 3.4 td_lambda.py / training.rs: TD-Lambda学習
 
 ```python
 class TDLambdaTrainer:
-    """TD-Lambda による自己対戦学習"""
+    """TD-Lambda による自己対戦学習（仕様参照用のPython実装）"""
 
     def __init__(
         self,
@@ -697,7 +694,7 @@ class TDLambdaTrainer:
             next_value = -current_value  # 相手視点に反転
 ```
 
-### 3.5 train.py: 学習メインスクリプト
+### 3.5 train.py / rust_training.py: 学習メインスクリプト
 
 ```python
 def main():
@@ -709,14 +706,17 @@ def main():
     parser.add_argument("--output", type=str, default="weights.bin")
     args = parser.parse_args()
 
-    ntuple = NTupleNetwork()
-    trainer = TDLambdaTrainer(ntuple, args.alpha, args.lambda_, args.epsilon)
-
     print(f"Training for {args.games} games...")
-    trainer.train(args.games)
-
-    print(f"Exporting model to {args.output}...")
-    export_model(ntuple, args.output)
+    model_bytes = rust_training.train_to_bytes(
+        games=args.games,
+        alpha=args.alpha,
+        lambda_=args.lambda_,
+        epsilon=args.epsilon,
+        seed=args.seed,
+        progress_interval=args.progress_interval,
+    )
+    with open(args.output, "wb") as f:
+        f.write(model_bytes)
     print("Done.")
 ```
 
@@ -1070,10 +1070,12 @@ Reversi/
 ├── python/
 │   ├── requirements.txt         # numpy, pytest, ruff
 │   ├── train.py                 # 学習エントリポイント（CLI引数: --games, --alpha等）
-│   ├── board.py                 # Board クラス（Rust同等のビットボード）
-│   ├── ntuple.py                # NTupleNetwork クラス（タプル定義, 評価, 更新）
-│   ├── td_lambda.py             # TDLambdaTrainer クラス（自己対戦 + TD更新）
-│   ├── export_model.py          # export_model() 関数（weights.bin出力 + CRC32）
+│   ├── rust_training.py         # Rust拡張ローダ
+│   ├── rust_training_ext/       # PyO3 拡張クレート
+│   ├── board.py                 # Python仕様参照用 Board クラス
+│   ├── ntuple.py                # Python仕様参照用 NTupleNetwork クラス
+│   ├── td_lambda.py             # Python仕様参照用 TDLambdaTrainer クラス
+│   ├── export_model.py          # 参照実装のモデルエクスポート
 │   └── tests/
 │       ├── test_board.py
 │       ├── test_ntuple.py

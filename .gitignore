@@ -8,3 +8,5 @@ __pycache__/
 .pytest_tmp/
 pytest-cache-files-*/
 /tmp*/
+python/dist/
+python/rust_training_ext/target/

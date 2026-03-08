@@ -1,0 +1,12 @@
+[package]
+name = "reversi_training_ext"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "_reversi_training"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+reversi = { path = "../../rust" }

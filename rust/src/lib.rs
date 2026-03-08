@@ -12,6 +12,8 @@ pub use crate::game::{PLAYER_BLACK, PLAYER_WHITE};
 pub mod ai;
 pub mod board;
 pub mod game;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod training;
 pub mod types;
 
 const MIN_LEVEL: u8 = 1;
