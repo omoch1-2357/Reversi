@@ -43,13 +43,20 @@ maturin build \
   --out python/dist \
   --interpreter "${PYTHON_BIN}"
 
+shopt -s nullglob
 wheels=(python/dist/reversi_training_ext-*.whl)
+shopt -u nullglob
 if [[ "${#wheels[@]}" -eq 0 ]]; then
   echo "No built wheel was found under python/dist." >&2
   exit 1
 fi
 
-wheel_path="$(ls -t "${wheels[@]}" | head -n 1)"
+wheel_path=""
+for wheel in "${wheels[@]}"; do
+  if [[ -z "${wheel_path}" || "${wheel}" -nt "${wheel_path}" ]]; then
+    wheel_path="${wheel}"
+  fi
+done
 
 echo "> ${PYTHON_BIN} -m pip install --force-reinstall ${wheel_path}"
 "${PYTHON_BIN}" -m pip install --force-reinstall "${wheel_path}"

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from importlib import import_module
 from types import ModuleType
-from typing import Callable
 
 ProgressCallback = Callable[[int, int, float], None]
 

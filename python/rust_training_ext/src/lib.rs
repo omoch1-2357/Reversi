@@ -37,15 +37,29 @@ fn train_to_bytes(
         }
     };
 
-    match reversi::training::train_to_bytes(
-        games,
-        alpha,
-        lambda_,
-        epsilon,
-        seed,
-        progress_interval,
-        Some(&mut progress),
-    ) {
+    let result = if progress_callback.is_some() {
+        reversi::training::train_to_bytes(
+            games,
+            alpha,
+            lambda_,
+            epsilon,
+            seed,
+            progress_interval,
+            Some(&mut progress),
+        )
+    } else {
+        reversi::training::train_to_bytes(
+            games,
+            alpha,
+            lambda_,
+            epsilon,
+            seed,
+            progress_interval,
+            None,
+        )
+    };
+
+    match result {
         Ok(bytes) => Ok(bytes),
         Err(err) => {
             if let Some(pyerr) = callback_error {
