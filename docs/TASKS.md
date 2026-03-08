@@ -188,7 +188,7 @@
 
 ### 5-2. CD ワークフロー（`.github/workflows/deploy.yml`）
 
-- [ ] ビルド → size-gate → GitHub Pages デプロイ
+- [x] ビルド → size-gate → GitHub Pages デプロイ
 
 ### 5-3. 本番リリース
 
