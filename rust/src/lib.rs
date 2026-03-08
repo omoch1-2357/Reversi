@@ -590,6 +590,10 @@ mod tests {
         current_player: u8,
     }
 
+    // Simple test-only LCG for deterministic position sampling. `next_usize`
+    // uses modulo reduction, which can bias distribution, but that is
+    // acceptable for the small upper bounds used in these tests. Do not use
+    // this RNG for production or cryptographic code.
     struct Lcg {
         state: u64,
     }

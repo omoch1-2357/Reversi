@@ -4,12 +4,15 @@ import { startLevel } from './helpers'
 test('supported-browser flow reaches the final result dialog', async ({ page }) => {
   await startLevel(page, 1)
 
+  // The compatibility matrix runs slower than the Chromium-only suite, so this
+  // spec intentionally bypasses `advanceOnePlayerTurn` / `playUntilGameOver`
+  // and drives the DOM inside `page.evaluate` to avoid Playwright round-trips.
   await page.evaluate(async () => {
     const resultSelector = '[aria-label="Game result"]'
     const legalMoveSelector = 'button[aria-label$="legal move"]'
     const playerTurnText = 'Your turn (Black)'
 
-    const waitForNextTurn = (): Promise<'game_over' | 'player_turn'> =>
+    const waitForPlayableTurn = (): Promise<'game_over' | Element> =>
       new Promise((resolve, reject) => {
         const deadline = performance.now() + 30_000
 
@@ -22,7 +25,7 @@ test('supported-browser flow reaches the final result dialog', async ({ page }) 
           const legalMove = document.querySelector(legalMoveSelector)
           const bodyText = document.body.textContent ?? ''
           if (legalMove !== null && bodyText.includes(playerTurnText)) {
-            resolve('player_turn')
+            resolve(legalMove)
             return
           }
 
@@ -38,20 +41,12 @@ test('supported-browser flow reaches the final result dialog', async ({ page }) 
       })
 
     for (let turn = 0; turn < 80; turn += 1) {
-      if (document.querySelector(resultSelector) !== null) {
+      const nextAction = await waitForPlayableTurn()
+      if (nextAction === 'game_over') {
         return
       }
 
-      const legalMove = document.querySelector(legalMoveSelector)
-      if (!(legalMove instanceof HTMLButtonElement)) {
-        throw new Error('No legal move button was available before game over')
-      }
-
-      legalMove.click()
-      const status = await waitForNextTurn()
-      if (status === 'game_over') {
-        return
-      }
+      nextAction.click()
     }
 
     throw new Error('Game did not finish within 80 player turns')

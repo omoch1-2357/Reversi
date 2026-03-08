@@ -85,7 +85,7 @@ jobs:
           version: ${{ env.WASM_PACK_VERSION }}
 
       - name: Run wasm-pack build
-        run: wasm-pack build rust --target web
+        run: wasm-pack build rust --target web --out-dir ../web/src/wasm/pkg
 
   web-build:
     name: web-build

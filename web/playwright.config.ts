@@ -2,6 +2,10 @@ import { defineConfig } from '@playwright/test'
 
 const desktopViewport = { width: 1280, height: 720 }
 const mobileViewport = { width: 375, height: 667 }
+const desktopChromium = {
+  browserName: 'chromium' as const,
+  viewport: desktopViewport,
+}
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,12 +24,11 @@ export default defineConfig({
     timeout: 240_000,
   },
   projects: [
+    // Keep separate project names so CI scripts can target the functional
+    // desktop suite and the broader compatibility suite independently.
     {
       name: 'desktop-chromium',
-      use: {
-        browserName: 'chromium',
-        viewport: desktopViewport,
-      },
+      use: desktopChromium,
     },
     {
       name: 'mobile-chromium',
@@ -38,10 +41,7 @@ export default defineConfig({
     },
     {
       name: 'compat-chromium',
-      use: {
-        browserName: 'chromium',
-        viewport: desktopViewport,
-      },
+      use: desktopChromium,
     },
     {
       name: 'compat-firefox',
