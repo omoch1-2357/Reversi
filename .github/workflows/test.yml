@@ -61,6 +61,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r python/requirements.txt
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Python Rust extension wheel
+        run: maturin build --manifest-path python/rust_training_ext/Cargo.toml --out python/dist --interpreter python
+
+      - name: Install Python Rust extension wheel
+        run: pip install --force-reinstall python/dist/*.whl
+
       - name: Run pytest
         run: pytest python/tests -q
 

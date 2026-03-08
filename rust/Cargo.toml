@@ -14,6 +14,10 @@ once_cell = "1.21"
 crc32fast = "1.4"
 web-time = "1.1"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 js-sys = "0.3"

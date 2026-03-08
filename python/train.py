@@ -10,9 +10,9 @@ from time import perf_counter
 from typing import Sequence
 import zlib
 
-from export_model import HEADER_SIZE, MAGIC, VERSION, export_model
+from export_model import HEADER_SIZE, MAGIC, VERSION
 from ntuple import NTupleNetwork
-from td_lambda import TDLambdaTrainer
+from rust_training import train_to_bytes
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -153,21 +153,17 @@ def train_and_export(
     output_path = output
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    ntuple = NTupleNetwork()
-    trainer = TDLambdaTrainer(
-        ntuple=ntuple,
+    model_bytes = train_to_bytes(
+        games=games,
         alpha=alpha,
         lambda_=lambda_,
         epsilon=epsilon,
         seed=seed,
-    )
-    trainer.train(
-        games,
         progress_interval=progress_interval,
         progress_callback=log_training_progress,
     )
-    export_model(ntuple, output_path)
-    verify_exported_model(output_path, ntuple.TUPLE_PATTERNS)
+    output_path.write_bytes(model_bytes)
+    verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
     return output_path
 
 
