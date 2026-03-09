@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PLAYER_BLACK, PLAYER_WHITE } from '../types/player'
 
 const wasmMock = vi.hoisted(() => ({
   init: vi.fn(),
@@ -86,36 +87,49 @@ describe('wasm wrapper', () => {
   it('initGame validates level before readiness check', async () => {
     const wrapper = await loadWrapper()
 
-    expect(() => wrapper.initGame(0)).toThrow(
+    expect(() => wrapper.initGame(0, PLAYER_BLACK)).toThrow(
       'level must be an integer between 1 and 6',
     )
-    expect(() => wrapper.initGame(7)).toThrow(
+    expect(() => wrapper.initGame(7, PLAYER_BLACK)).toThrow(
       'level must be an integer between 1 and 6',
     )
-    expect(() => wrapper.initGame(1.5)).toThrow(
+    expect(() => wrapper.initGame(1.5, PLAYER_BLACK)).toThrow(
       'level must be an integer between 1 and 6',
     )
     expect(wasmMock.wasm_ready).not.toHaveBeenCalled()
     expect(wasmMock.init_game).not.toHaveBeenCalled()
   })
 
-  it('initGame accepts boundary levels and returns validated GameState', async () => {
+  it('initGame validates player color before readiness check', async () => {
     const wrapper = await loadWrapper()
 
-    const minLevelState = wrapper.initGame(1)
-    const maxLevelState = wrapper.initGame(6)
+    expect(() => wrapper.initGame(1, 0 as 1)).toThrow(
+      'player must be 1 (black) or 2 (white)',
+    )
+    expect(() => wrapper.initGame(1, 3 as 1)).toThrow(
+      'player must be 1 (black) or 2 (white)',
+    )
+    expect(wasmMock.wasm_ready).not.toHaveBeenCalled()
+    expect(wasmMock.init_game).not.toHaveBeenCalled()
+  })
+
+  it('initGame accepts boundary levels and both player colors', async () => {
+    const wrapper = await loadWrapper()
+
+    const minLevelState = wrapper.initGame(1, PLAYER_BLACK)
+    const maxLevelState = wrapper.initGame(6, PLAYER_WHITE)
 
     expect(minLevelState.board).toHaveLength(64)
     expect(maxLevelState.board).toHaveLength(64)
-    expect(wasmMock.init_game).toHaveBeenNthCalledWith(1, 1)
-    expect(wasmMock.init_game).toHaveBeenNthCalledWith(2, 6)
+    expect(wasmMock.init_game).toHaveBeenNthCalledWith(1, 1, PLAYER_BLACK)
+    expect(wasmMock.init_game).toHaveBeenNthCalledWith(2, 6, PLAYER_WHITE)
   })
 
   it('initGame throws when wasm module is not initialized', async () => {
     const wrapper = await loadWrapper()
     wasmMock.wasm_ready.mockReturnValueOnce(false)
 
-    expect(() => wrapper.initGame(1)).toThrow(wasmNotReadyMessage)
+    expect(() => wrapper.initGame(1, PLAYER_BLACK)).toThrow(wasmNotReadyMessage)
     expect(wasmMock.init_game).not.toHaveBeenCalled()
   })
 

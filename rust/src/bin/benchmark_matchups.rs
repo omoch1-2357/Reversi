@@ -11,7 +11,8 @@ use reversi::ai::search::Searcher;
 use reversi::board::Board;
 use web_time::Duration as WebDuration;
 
-const EMBEDDED_MODEL_BYTES: &[u8] = include_bytes!("../ai/weights.bin");
+const EMBEDDED_MODEL_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/embedded_weights.bin"));
 const MAX_GAME_STEPS: usize = 200;
 const MIN_LEVEL: u8 = 1;
 const MAX_LEVEL: u8 = 6;
@@ -68,7 +69,7 @@ fn main() -> Result<(), String> {
     let evaluator = load_evaluator(config.weights_path.as_ref())?;
 
     println!(
-        "Benchmarking embedded weights.bin: games_per_matchup={}, level={}, seed={}, random_opening_plies={}, weights_timeout_ms={}, opponent_timeout_ms={}",
+        "Benchmarking weights.bin AI: games_per_matchup={}, level={}, seed={}, random_opening_plies={}, weights_timeout_ms={}, opponent_timeout_ms={}",
         config.games_per_matchup,
         config.level,
         config.seed,
@@ -79,7 +80,7 @@ fn main() -> Result<(), String> {
     if let Some(path) = &config.weights_path {
         println!("Model source: {}", path.display());
     } else {
-        println!("Model source: embedded rust/src/ai/weights.bin");
+        println!("Model source: embedded model in current binary");
     }
     println!();
 

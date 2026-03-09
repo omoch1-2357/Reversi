@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:wasm": "wasm-pack build ../rust --target web --out-dir ../web/src/wasm/pkg",
-    "build": "npm run build:wasm && tsc -b && vite build",
+    "build:wasm": "node ./scripts/build-wasm.mjs",
+    "build": "node ./scripts/build-web.mjs",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "test:e2e": "playwright test e2e/app.e2e.spec.ts --project=desktop-chromium --project=mobile-chromium",

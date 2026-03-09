@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GameResult, GameState, Position } from '../wasm'
+import { PLAYER_BLACK, type Player } from '../types/player'
 import type { WorkerRequest, WorkerResponse } from '../workers/wasm.worker'
 import workerUrl from '../workers/wasm.worker.ts?worker&url'
 
@@ -9,7 +10,7 @@ export interface GameHook {
   isThinking: boolean
   error: string | null
   result: GameResult | null
-  startGame: (level: number) => Promise<void>
+  startGame: (level: number, player: Player) => Promise<void>
   placeStone: (row: number, col: number) => Promise<void>
   restart: () => Promise<void>
 }
@@ -25,6 +26,7 @@ interface PendingRequest {
 }
 
 const DEFAULT_LEVEL = 1
+const DEFAULT_PLAYER = PLAYER_BLACK
 const createDefaultWorker = (): Worker => new Worker(workerUrl, { type: 'module' })
 
 const isValidLevel = (level: number): boolean =>
@@ -40,6 +42,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
   const createWorkerRef = useRef(options.createWorker ?? createDefaultWorker)
   const workerRef = useRef<Worker | null>(null)
   const levelRef = useRef(DEFAULT_LEVEL)
+  const playerRef = useRef<Player>(DEFAULT_PLAYER)
   const requestCounterRef = useRef(0)
   const pendingRequestRef = useRef<PendingRequest | null>(null)
 
@@ -203,7 +206,7 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
   }, [])
 
   const startGame = useCallback(
-    async (level: number): Promise<void> => {
+    async (level: number, player: Player): Promise<void> => {
       if (!isValidLevel(level)) {
         const levelError = new Error('level must be an integer between 1 and 6')
         setError(levelError.message)
@@ -211,9 +214,10 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
       }
 
       levelRef.current = level
+      playerRef.current = player
       setResult(null)
       setLegalMoves([])
-      await sendRequest({ type: 'init_game', payload: { level } })
+      await sendRequest({ type: 'init_game', payload: { level, player } })
     },
     [sendRequest],
   )
@@ -234,7 +238,10 @@ export const useGame = (options: UseGameOptions = {}): GameHook => {
   const restart = useCallback(async (): Promise<void> => {
     setResult(null)
     setLegalMoves([])
-    await sendRequest({ type: 'init_game', payload: { level: levelRef.current } })
+    await sendRequest({
+      type: 'init_game',
+      payload: { level: levelRef.current, player: playerRef.current },
+    })
   }, [sendRequest])
 
   return {

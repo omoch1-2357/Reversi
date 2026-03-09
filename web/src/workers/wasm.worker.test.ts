@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PLAYER_BLACK, PLAYER_WHITE } from '../types/player'
 import type { GameResult, GameState, Position } from '../wasm'
 import {
   createWorkerMessageHandler,
@@ -75,7 +76,7 @@ const requireRealWasm = process.env.REQUIRE_REAL_WASM === 'true' || isCi
 
 type ReversiBindingsModule = {
   default: (input?: unknown) => Promise<unknown>
-  init_game: (level: number) => unknown
+  init_game: (level: number, player: number) => unknown
   get_legal_moves: () => unknown
   place_stone: (row: number, col: number) => unknown
   ai_move: () => unknown
@@ -129,7 +130,8 @@ const ensureRealWasmLoaded: WorkerDependencies['ensureWasmModuleLoaded'] = async
 
 const realWasmDependencies: WorkerDependencies = {
   ensureWasmModuleLoaded: ensureRealWasmLoaded,
-  initGame: (level: number): GameState => getLoadedBindings().init_game(level) as GameState,
+  initGame: (level: number, player: number): GameState =>
+    getLoadedBindings().init_game(level, player) as GameState,
   getLegalMoves: (): Position[] => getLoadedBindings().get_legal_moves() as Position[],
   placeStone: (row: number, col: number): GameState =>
     getLoadedBindings().place_stone(row, col) as GameState,
@@ -147,7 +149,7 @@ const runDeterministicGameWithWorkerHandler = async (
   const { scope, posted } = makeScope()
   const handler = createWorkerMessageHandler(scope, realWasmDependencies)
 
-  await handler({ data: { type: 'init_game', payload: { level } } })
+  await handler({ data: { type: 'init_game', payload: { level, player: PLAYER_BLACK } } })
   let terminalMessage = posted[posted.length - 1]
   if (terminalMessage?.type !== 'game_state') {
     throw new Error('init_game did not produce game_state')
@@ -230,10 +232,10 @@ describe('wasm worker handler', () => {
     const { scope, posted } = makeScope()
     const handler = createWorkerMessageHandler(scope)
 
-    await handler({ data: { type: 'init_game', payload: { level: 3 } } })
+    await handler({ data: { type: 'init_game', payload: { level: 3, player: PLAYER_BLACK } } })
 
     expect(wasmMock.ensureWasmModuleLoaded).toHaveBeenCalledTimes(1)
-    expect(wasmMock.initGame).toHaveBeenCalledWith(3)
+    expect(wasmMock.initGame).toHaveBeenCalledWith(3, PLAYER_BLACK)
     expect(wasmMock.getLegalMoves).toHaveBeenCalledTimes(1)
     expect(posted).toEqual([
       {
@@ -254,7 +256,9 @@ describe('wasm worker handler', () => {
     wasmMock.initGame.mockReturnValueOnce(nextState)
     wasmMock.getLegalMoves.mockReturnValueOnce([{ row: 2, col: 3 }])
 
-    await handler({ data: { requestId, type: 'init_game', payload: { level: 2 } } })
+    await handler({
+      data: { requestId, type: 'init_game', payload: { level: 2, player: PLAYER_BLACK } },
+    })
 
     expect(posted).toEqual([
       {
@@ -264,6 +268,28 @@ describe('wasm worker handler', () => {
           state: nextState,
           moves: [{ row: 2, col: 3 }],
         },
+      },
+    ])
+  })
+
+  it('runs AI opening during init_game when the player chooses white', async () => {
+    const { scope, posted } = makeScope()
+    const handler = createWorkerMessageHandler(scope)
+    const openingState = makeGameState({ current_player: PLAYER_BLACK })
+    const afterAiOpening = makeGameState({ current_player: PLAYER_WHITE, flipped: [19] })
+    wasmMock.initGame.mockReturnValueOnce(openingState)
+    wasmMock.aiMove.mockReturnValueOnce(afterAiOpening)
+    wasmMock.getLegalMoves.mockReturnValueOnce([{ row: 2, col: 4 }])
+
+    await handler({ data: { type: 'init_game', payload: { level: 3, player: PLAYER_WHITE } } })
+
+    expect(wasmMock.initGame).toHaveBeenCalledWith(3, PLAYER_WHITE)
+    expect(wasmMock.aiMove).toHaveBeenCalledTimes(1)
+    expect(posted).toEqual([
+      { type: 'ai_step', payload: { state: afterAiOpening } },
+      {
+        type: 'game_state',
+        payload: { state: afterAiOpening, moves: [{ row: 2, col: 4 }] },
       },
     ])
   })
@@ -517,10 +543,12 @@ describe('wasm worker handler', () => {
 
     expect(onmessage).not.toBeNull()
 
-    await onmessage?.({ data: { type: 'init_game', payload: { level: 3 } } })
+    await onmessage?.({
+      data: { type: 'init_game', payload: { level: 3, player: PLAYER_BLACK } },
+    })
 
     expect(wasmMock.ensureWasmModuleLoaded).toHaveBeenCalledTimes(1)
-    expect(wasmMock.initGame).toHaveBeenCalledWith(3)
+    expect(wasmMock.initGame).toHaveBeenCalledWith(3, PLAYER_BLACK)
     expect(wasmMock.getLegalMoves).toHaveBeenCalledTimes(1)
     expect(posted).toEqual([
       {

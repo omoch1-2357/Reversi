@@ -9,10 +9,14 @@ import {
   type GameState,
   type Position,
 } from '../wasm'
+import { PLAYER_BLACK, opponentOf, type Player } from '../types/player'
 
 type RequestWithId = { requestId?: string }
 
-type InitGameRequest = RequestWithId & { type: 'init_game'; payload: { level: number } }
+type InitGameRequest = RequestWithId & {
+  type: 'init_game'
+  payload: { level: number; player: Player }
+}
 type PlaceStoneRequest = {
   type: 'place_stone'
   payload: { row: number; col: number }
@@ -62,12 +66,23 @@ const INVALID_MESSAGE_SHAPE = 'Invalid worker message shape'
 const isIntegerInRange = (value: unknown, min: number, max: number): boolean =>
   typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
 
+const isValidPlayerValue = (value: unknown): value is Player =>
+  value === 1 || value === 2
+
 const isValidInitPayload = (payload: unknown): payload is InitGameRequest['payload'] => {
-  if (typeof payload !== 'object' || payload === null || !('level' in payload)) {
+  if (
+    typeof payload !== 'object'
+    || payload === null
+    || !('level' in payload)
+    || !('player' in payload)
+  ) {
     return false
   }
 
-  return isIntegerInRange((payload as { level: unknown }).level, 1, 6)
+  return (
+    isIntegerInRange((payload as { level: unknown }).level, 1, 6)
+    && isValidPlayerValue((payload as { player: unknown }).player)
+  )
 }
 
 const isValidPlaceStonePayload = (
@@ -91,6 +106,8 @@ export const createWorkerMessageHandler = (
   scope: WorkerScopeLike,
   dependencies: WorkerDependencies = defaultDependencies,
 ): ((event: WorkerMessageEvent) => Promise<void>) => {
+  let playerColor: Player = PLAYER_BLACK
+
   const postResponse = (message: WorkerResponse, requestId?: string): void => {
     if (requestId === undefined) {
       scope.postMessage(message)
@@ -134,7 +151,30 @@ export const createWorkerMessageHandler = (
           }
 
           await dependencies.ensureWasmModuleLoaded()
-          const state = dependencies.initGame(payload.level)
+          playerColor = payload.player
+          const aiPlayer = opponentOf(playerColor)
+          let state = dependencies.initGame(payload.level, payload.player)
+          let aiStepCount = 0
+
+          while (state.current_player === aiPlayer && !state.is_game_over) {
+            if (aiStepCount >= MAX_AI_STEPS) {
+              postResponse({
+                type: 'error',
+                payload: `AI move loop exceeded safety cap (${MAX_AI_STEPS})`,
+              }, requestId)
+              return
+            }
+            aiStepCount += 1
+            state = dependencies.aiMove()
+            postResponse({ type: 'ai_step', payload: { state } }, requestId)
+          }
+
+          if (state.is_game_over) {
+            const result = dependencies.getResult()
+            postResponse({ type: 'game_over', payload: { state, result } }, requestId)
+            return
+          }
+
           const moves = dependencies.getLegalMoves()
           postResponse({ type: 'game_state', payload: { state, moves } }, requestId)
           return
@@ -159,7 +199,7 @@ export const createWorkerMessageHandler = (
           }
 
           let aiStepCount = 0
-          while (state.current_player === 2 && !state.is_game_over) {
+          while (state.current_player !== playerColor && !state.is_game_over) {
             if (aiStepCount === 0) {
               // Surface the player's move immediately before the AI starts thinking.
               postResponse({ type: 'ai_step', payload: { state } }, requestId)

@@ -57,7 +57,12 @@ fn assert_winner_consistency(black: u8, white: u8, winner: u8) {
 
 #[test]
 fn playthrough_init_place_ai_get_result_flow_works() {
-    let mut game = GameInstance::new(3, Box::new(SearchBackedSelector::from_embedded_model()));
+    let mut game = GameInstance::new(
+        3,
+        PLAYER_BLACK,
+        Box::new(SearchBackedSelector::from_embedded_model()),
+    )
+    .expect("game must initialize");
 
     // init
     assert_eq!(game.current_player, PLAYER_BLACK);

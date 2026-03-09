@@ -19,8 +19,20 @@
   color: var(--text-muted);
 }
 
+.level-select__section {
+  margin-top: 14px;
+}
+
+.level-select__label {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .level-select__grid {
-  margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
@@ -28,6 +40,9 @@
 
 .level-select__option {
   min-height: 44px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   color: var(--text-main);
@@ -45,6 +60,12 @@
 .level-select__option--selected {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.level-select__option-meta {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .level-select__option:focus-visible {

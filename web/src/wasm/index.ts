@@ -8,6 +8,7 @@ import init, {
   type InitInput,
   type InitOutput,
 } from './pkg/reversi'
+import { PLAYER_BLACK, PLAYER_WHITE, type Player } from '../types/player'
 
 export interface Position {
   row: number
@@ -48,10 +49,11 @@ export const ensureWasmModuleLoaded = (
 
 export const wasmReady = (): boolean => wasmReadyRaw()
 
-export const initGame = (level: number): GameState => {
+export const initGame = (level: number, player: Player): GameState => {
   assertValidLevel(level)
+  assertValidPlayer(player)
   assertWasmReady()
-  return asGameState(wasmInitGame(level), 'init_game')
+  return asGameState(wasmInitGame(level, player), 'init_game')
 }
 
 export const getLegalMoves = (): Position[] => {
@@ -158,6 +160,12 @@ const asNumberArray = (value: unknown, label: string): number[] => {
 const assertValidLevel = (level: number): void => {
   if (!Number.isInteger(level) || level < 1 || level > 6) {
     throw new Error('level must be an integer between 1 and 6')
+  }
+}
+
+const assertValidPlayer = (player: number): void => {
+  if (player !== PLAYER_BLACK && player !== PLAYER_WHITE) {
+    throw new Error('player must be 1 (black) or 2 (white)')
   }
 }
 

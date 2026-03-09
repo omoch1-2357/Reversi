@@ -25,8 +25,17 @@ npm --prefix web run build:wasm
 The command runs:
 
 ```bash
-wasm-pack build ../rust --target web --out-dir ../web/src/wasm/pkg
+node ./scripts/build-wasm.mjs
 ```
+
+To embed a specific model at build time:
+
+```bash
+npm --prefix web run build:wasm -- --model-path=../models/custom.weights.bin
+```
+
+`--model-path` is resolved relative to `web/` and is forwarded to Rust via
+`REVERSI_MODEL_PATH`.
 
 Expected generated files:
 
@@ -43,6 +52,12 @@ Build all artifacts:
 
 ```bash
 npm --prefix web run build
+```
+
+You can pass the same option through the full production build:
+
+```bash
+npm --prefix web run build -- --model-path=../models/custom.weights.bin
 ```
 
 Expected output example:

@@ -19,7 +19,7 @@ pub mod types;
 const MIN_LEVEL: u8 = 1;
 const MAX_LEVEL: u8 = 6;
 
-static MODEL_BYTES: &[u8] = include_bytes!("ai/weights.bin");
+static MODEL_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/embedded_weights.bin"));
 static GAME: Lazy<Mutex<Option<GameInstance>>> = Lazy::new(|| Mutex::new(None));
 
 struct SearchMoveSelector {
@@ -50,13 +50,14 @@ pub fn wasm_ready() -> bool {
 }
 
 #[wasm_bindgen]
-pub fn init_game(level: u8) -> Result<JsValue, JsValue> {
+pub fn init_game(level: u8, player: u8) -> Result<JsValue, JsValue> {
     if !(MIN_LEVEL..=MAX_LEVEL).contains(&level) {
         return Err(JsValue::from_str("level must be in 1..=6"));
     }
 
     let evaluator = NTupleEvaluator::from_bytes(MODEL_BYTES).map_err(string_to_js)?;
-    let instance = GameInstance::new(level, Box::new(SearchMoveSelector::new(evaluator)));
+    let instance = GameInstance::new(level, player, Box::new(SearchMoveSelector::new(evaluator)))
+        .map_err(string_to_js)?;
 
     let mut guard = GAME
         .lock()
@@ -90,7 +91,7 @@ pub fn place_stone(row: u8, col: u8) -> Result<JsValue, JsValue> {
     if game.is_game_over {
         return Err(JsValue::from_str("game is already over"));
     }
-    if game.current_player != PLAYER_BLACK {
+    if game.current_player != game.player_color() {
         return Err(JsValue::from_str("it is not the player's turn"));
     }
 
@@ -110,7 +111,7 @@ pub fn ai_move() -> Result<JsValue, JsValue> {
     if game.is_game_over {
         return Err(JsValue::from_str("game is already over"));
     }
-    if game.current_player != PLAYER_WHITE {
+    if game.current_player != game.ai_color() {
         return Err(JsValue::from_str("it is not AI's turn"));
     }
 
@@ -178,6 +179,7 @@ mod tests {
     const ERROR_GAME_NOT_INITIALIZED: &str = "game is not initialized";
     const ERROR_PLAYER_TURN: &str = "it is not the player's turn";
     const ERROR_INVALID_LEVEL: &str = "level must be in 1..=6";
+    const ERROR_INVALID_PLAYER_COLOR: &str = "player color must be 1 (black) or 2 (white)";
 
     const T11_BLACK: u64 = 0xffc3_e7b9_98c8_80bf;
     const T11_WHITE: u64 = 0x003c_1846_6736_7f40;
@@ -193,7 +195,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn api_flow_init_place_ai_get_result_works_end_to_end() {
-        init_game(1).expect("init_game must succeed");
+        init_game(1, PLAYER_BLACK).expect("init_game must succeed");
         assert!(
             get_legal_moves().is_ok(),
             "get_legal_moves must succeed right after init"
@@ -216,13 +218,19 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn init_game_rejects_out_of_range_levels() {
-        expect_err_message(init_game(0), ERROR_INVALID_LEVEL);
-        expect_err_message(init_game(7), ERROR_INVALID_LEVEL);
+        expect_err_message(init_game(0, PLAYER_BLACK), ERROR_INVALID_LEVEL);
+        expect_err_message(init_game(7, PLAYER_BLACK), ERROR_INVALID_LEVEL);
+    }
+
+    #[wasm_bindgen_test]
+    fn init_game_rejects_invalid_player_color() {
+        expect_err_message(init_game(1, 0), ERROR_INVALID_PLAYER_COLOR);
+        expect_err_message(init_game(1, 3), ERROR_INVALID_PLAYER_COLOR);
     }
 
     #[wasm_bindgen_test]
     fn get_result_returns_error_while_game_is_active() {
-        init_game(1).expect("init_game must succeed");
+        init_game(1, PLAYER_BLACK).expect("init_game must succeed");
         expect_err_message(get_result(), "game is not over");
     }
 
@@ -240,7 +248,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn ai_move_smoke_meets_level_performance_target() {
         for level in MIN_LEVEL..=MAX_LEVEL {
-            init_game(level).expect("init_game must succeed");
+            init_game(level, PLAYER_BLACK).expect("init_game must succeed");
             let opening = first_internal_legal_move().expect("opening move must exist");
             place_stone(opening.row, opening.col).expect("place_stone must succeed");
 
@@ -288,7 +296,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn init_game_reinitializes_global_state() {
-        init_game(1).expect("first init_game must succeed");
+        init_game(1, PLAYER_BLACK).expect("first init_game must succeed");
         let opening = first_internal_legal_move().expect("opening move must exist");
         place_stone(opening.row, opening.col).expect("player move must succeed");
         assert_ne!(
@@ -297,7 +305,7 @@ mod tests {
             "state should change before reset"
         );
 
-        init_game(6).expect("second init_game must succeed");
+        init_game(6, PLAYER_BLACK).expect("second init_game must succeed");
         let reset = snapshot_state();
         assert_eq!(reset.current_player, PLAYER_BLACK);
         assert_eq!(reset.black_count, 2);
@@ -365,7 +373,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn place_stone_rejects_wrong_player_turn() {
-        init_game(1).expect("init_game must succeed");
+        init_game(1, PLAYER_BLACK).expect("init_game must succeed");
         let opening = first_internal_legal_move().expect("opening move must exist");
         place_stone(opening.row, opening.col).expect("first player move must succeed");
 
@@ -384,7 +392,7 @@ mod tests {
     }
 
     fn play_one_opening_and_ai_step(level: u8) -> GameState {
-        init_game(level).expect("init_game must succeed");
+        init_game(level, PLAYER_BLACK).expect("init_game must succeed");
         let opening = first_internal_legal_move().expect("opening move must exist");
         place_stone(opening.row, opening.col).expect("place_stone must succeed");
         ai_move().expect("ai_move must succeed");
@@ -392,7 +400,7 @@ mod tests {
     }
 
     fn ai_move_index_after_opening(level: u8) -> usize {
-        init_game(level).expect("init_game must succeed");
+        init_game(level, PLAYER_BLACK).expect("init_game must succeed");
         let opening = first_internal_legal_move().expect("opening move must exist");
         place_stone(opening.row, opening.col).expect("place_stone must succeed");
         let before = snapshot_state().board;
@@ -497,7 +505,12 @@ mod tests {
     fn inject_test_board(level: u8, board: Board, current_player: u8) {
         let evaluator = NTupleEvaluator::from_bytes(MODEL_BYTES)
             .expect("embedded model bytes must deserialize for wasm tests");
-        let mut game = GameInstance::new(level, Box::new(SearchMoveSelector::new(evaluator)));
+        let mut game = GameInstance::new(
+            level,
+            PLAYER_BLACK,
+            Box::new(SearchMoveSelector::new(evaluator)),
+        )
+        .expect("test game must initialize");
         game.set_board_for_test(board, current_player);
         let mut guard = GAME.lock().expect("game lock must not be poisoned");
         *guard = Some(game);
@@ -625,8 +638,10 @@ mod tests {
     fn run_tie_break_step() -> TieBreakResult {
         let mut game = GameInstance::new(
             1,
+            PLAYER_BLACK,
             Box::new(SearchMoveSelector::new(build_constant_evaluator())),
-        );
+        )
+        .expect("test game must initialize");
         game.place(2, 3)
             .expect("fixed opening move should be legal");
 

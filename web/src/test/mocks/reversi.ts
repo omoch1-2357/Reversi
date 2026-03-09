@@ -16,8 +16,9 @@ export const get_result = (): never => {
   throw new Error('test mock: get_result is not implemented')
 }
 
-export const init_game = (level: number): never => {
+export const init_game = (level: number, player: number): never => {
   void level
+  void player
   throw new Error('test mock: init_game is not implemented')
 }
 

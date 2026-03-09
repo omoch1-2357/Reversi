@@ -1,31 +1,36 @@
 import styles from '../styles/GameInfo.module.css'
-import { PLAYER_TURN_TEXT } from '../constants/accessibility'
-import { PLAYER_BLACK, PLAYER_WHITE, type Player } from '../types/player'
+import { getPlayerTurnText } from '../constants/accessibility'
+import { playerLabel, type Player } from '../types/player'
 
 interface GameInfoProps {
   blackCount: number
   whiteCount: number
   currentPlayer: Player
+  playerColor: Player
   isThinking: boolean
   isPass: boolean
   isGameOver: boolean
 }
 
-const getTurnLabel = (currentPlayer: Player, isGameOver: boolean): string => {
+const getTurnLabel = (
+  currentPlayer: Player,
+  playerColor: Player,
+  isGameOver: boolean,
+): string => {
   if (isGameOver) {
     return 'Game over'
   }
-  return currentPlayer === PLAYER_BLACK
-    ? PLAYER_TURN_TEXT
-    : currentPlayer === PLAYER_WHITE
-      ? 'AI turn (White)'
-      : 'Unknown turn'
+
+  return currentPlayer === playerColor
+    ? getPlayerTurnText(playerColor)
+    : `AI turn (${playerLabel(currentPlayer)})`
 }
 
 function GameInfo({
   blackCount,
   whiteCount,
   currentPlayer,
+  playerColor,
   isThinking,
   isPass,
   isGameOver,
@@ -33,7 +38,7 @@ function GameInfo({
   const passMessage =
     !isPass || isGameOver
       ? null
-      : currentPlayer === PLAYER_BLACK
+      : currentPlayer === playerColor
         ? 'AI passed. Your turn continues.'
         : 'You have no legal moves. AI continues.'
 
@@ -53,7 +58,9 @@ function GameInfo({
           <strong>{whiteCount}</strong>
         </p>
       </div>
-      <p className={styles['game-info__turn']}>{getTurnLabel(currentPlayer, isGameOver)}</p>
+      <p className={styles['game-info__turn']}>
+        {getTurnLabel(currentPlayer, playerColor, isGameOver)}
+      </p>
       {passMessage ? <p className={styles['game-info__thinking']}>{passMessage}</p> : null}
       {isThinking ? (
         <p className={styles['game-info__thinking']} role="status">

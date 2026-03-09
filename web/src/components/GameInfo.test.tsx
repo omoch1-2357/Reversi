@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import GameInfo from './GameInfo'
+import { PLAYER_BLACK, PLAYER_WHITE } from '../types/player'
 
 afterEach(() => {
   cleanup()
@@ -12,7 +13,8 @@ describe('GameInfo', () => {
       <GameInfo
         blackCount={18}
         whiteCount={12}
-        currentPlayer={2}
+        currentPlayer={PLAYER_WHITE}
+        playerColor={PLAYER_BLACK}
         isThinking
         isPass={false}
         isGameOver={false}
@@ -32,7 +34,8 @@ describe('GameInfo', () => {
       <GameInfo
         blackCount={10}
         whiteCount={8}
-        currentPlayer={1}
+        currentPlayer={PLAYER_BLACK}
+        playerColor={PLAYER_BLACK}
         isThinking={false}
         isPass={false}
         isGameOver={false}
@@ -42,12 +45,29 @@ describe('GameInfo', () => {
     expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
   })
 
+  it('shows player turn label when the player chose white', () => {
+    render(
+      <GameInfo
+        blackCount={10}
+        whiteCount={8}
+        currentPlayer={PLAYER_WHITE}
+        playerColor={PLAYER_WHITE}
+        isThinking={false}
+        isPass={false}
+        isGameOver={false}
+      />,
+    )
+
+    expect(screen.getByText('Your turn (White)')).toBeInTheDocument()
+  })
+
   it('does not render thinking indicator when isThinking is false', () => {
     render(
       <GameInfo
         blackCount={22}
         whiteCount={20}
-        currentPlayer={2}
+        currentPlayer={PLAYER_WHITE}
+        playerColor={PLAYER_BLACK}
         isThinking={false}
         isPass={false}
         isGameOver={false}
@@ -62,7 +82,8 @@ describe('GameInfo', () => {
       <GameInfo
         blackCount={33}
         whiteCount={31}
-        currentPlayer={1}
+        currentPlayer={PLAYER_BLACK}
+        playerColor={PLAYER_BLACK}
         isThinking={false}
         isPass={false}
         isGameOver
@@ -77,7 +98,8 @@ describe('GameInfo', () => {
       <GameInfo
         blackCount={24}
         whiteCount={19}
-        currentPlayer={1}
+        currentPlayer={PLAYER_BLACK}
+        playerColor={PLAYER_BLACK}
         isThinking={false}
         isPass
         isGameOver={false}
@@ -92,7 +114,8 @@ describe('GameInfo', () => {
       <GameInfo
         blackCount={19}
         whiteCount={24}
-        currentPlayer={2}
+        currentPlayer={PLAYER_WHITE}
+        playerColor={PLAYER_BLACK}
         isThinking={false}
         isPass
         isGameOver={false}

@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { PLAYER_BLACK, PLAYER_WHITE } from '../types/player'
 import type { GameResult, GameState, Position } from '../wasm'
 import type { WorkerRequest, WorkerResponse } from '../workers/wasm.worker'
 import { useGame } from './useGame'
@@ -71,12 +72,12 @@ describe('useGame', () => {
 
     let startPromise!: Promise<void>
     act(() => {
-      startPromise = result.current.startGame(3)
+      startPromise = result.current.startGame(3, PLAYER_BLACK)
     })
 
     expect(worker.postedMessages).toHaveLength(1)
     expect(worker.postedMessages[0]).toEqual(
-      expect.objectContaining({ type: 'init_game', payload: { level: 3 } }),
+      expect.objectContaining({ type: 'init_game', payload: { level: 3, player: PLAYER_BLACK } }),
     )
     const requestId = worker.postedMessages[0].requestId
     expect(typeof requestId).toBe('string')
@@ -112,7 +113,7 @@ describe('useGame', () => {
 
     let initPromise!: Promise<void>
     act(() => {
-      initPromise = result.current.startGame(2)
+      initPromise = result.current.startGame(2, PLAYER_BLACK)
     })
     const initRequestId = worker.postedMessages[0].requestId
     expect(typeof initRequestId).toBe('string')
@@ -169,7 +170,7 @@ describe('useGame', () => {
 
     let startPromise!: Promise<void>
     act(() => {
-      startPromise = result.current.startGame(1)
+      startPromise = result.current.startGame(1, PLAYER_WHITE)
     })
     const requestId = worker.postedMessages[0].requestId
     expect(typeof requestId).toBe('string')
@@ -195,7 +196,7 @@ describe('useGame', () => {
 
     let startPromise!: Promise<void>
     act(() => {
-      startPromise = result.current.startGame(4)
+      startPromise = result.current.startGame(4, PLAYER_BLACK)
     })
     const requestId = worker.postedMessages[0].requestId
     expect(typeof requestId).toBe('string')
@@ -218,7 +219,7 @@ describe('useGame', () => {
 
     let firstPromise!: Promise<void>
     act(() => {
-      firstPromise = result.current.startGame(5)
+      firstPromise = result.current.startGame(5, PLAYER_BLACK)
     })
     expect(worker.postedMessages).toHaveLength(1)
     const firstRequestId = worker.postedMessages[0].requestId

@@ -26,6 +26,7 @@ impl MoveSelector for FirstLegalMoveSelector {
 
 pub struct GameInstance {
     board: Board,
+    player_color: u8,
     pub current_player: u8,
     pub level: u8,
     pub is_game_over: bool,
@@ -35,32 +36,41 @@ pub struct GameInstance {
 }
 
 impl GameInstance {
-    pub fn new(level: u8, evaluator: Box<dyn MoveSelector>) -> Self {
-        Self {
+    pub fn new(
+        level: u8,
+        player_color: u8,
+        evaluator: Box<dyn MoveSelector>,
+    ) -> Result<Self, String> {
+        if !is_valid_player(player_color) {
+            return Err("player color must be 1 (black) or 2 (white)".to_string());
+        }
+
+        Ok(Self {
             board: Board::new(),
+            player_color,
             current_player: PLAYER_BLACK,
             level,
             is_game_over: false,
             is_pass: false,
             flipped: Vec::new(),
             evaluator,
-        }
+        })
     }
 
-    pub fn new_with_default_selector(level: u8) -> Self {
-        Self::new(level, Box::new(FirstLegalMoveSelector))
+    pub fn new_with_default_selector(level: u8, player_color: u8) -> Result<Self, String> {
+        Self::new(level, player_color, Box::new(FirstLegalMoveSelector))
     }
 
     pub fn place(&mut self, row: u8, col: u8) -> Result<(), String> {
         if self.is_game_over {
             return Err("game is already over".to_string());
         }
-        if self.current_player != PLAYER_BLACK {
+        if self.current_player != self.player_color {
             return Err("it is not the player's turn".to_string());
         }
 
         let pos = row_col_to_pos(row, col)?;
-        self.apply_move(pos, true)
+        self.apply_move(pos, self.player_color == PLAYER_BLACK)
     }
 
     pub fn has_legal_moves_for_current(&self) -> bool {
@@ -81,18 +91,19 @@ impl GameInstance {
         if self.is_game_over {
             return Err("game is already over".to_string());
         }
-        if self.current_player != PLAYER_WHITE {
+        if self.current_player != self.ai_color() {
             return Err("it is not AI's turn".to_string());
         }
 
-        let legal = self.board.legal_moves(false);
+        let ai_is_black = self.ai_color() == PLAYER_BLACK;
+        let legal = self.board.legal_moves(ai_is_black);
         if legal == 0 {
             return Err("AI has no legal moves".to_string());
         }
 
         let selected = self
             .evaluator
-            .select_move(&self.board, false, self.level)
+            .select_move(&self.board, ai_is_black, self.level)
             .ok_or_else(|| "AI could not select a move".to_string())?;
 
         if selected >= BOARD_LEN {
@@ -102,7 +113,7 @@ impl GameInstance {
             return Err("AI selected an illegal move".to_string());
         }
 
-        self.apply_move(selected, false)
+        self.apply_move(selected, ai_is_black)
     }
 
     pub fn get_legal_moves(&self) -> Vec<Position> {
@@ -142,6 +153,14 @@ impl GameInstance {
             black_count,
             white_count,
         }
+    }
+
+    pub fn player_color(&self) -> u8 {
+        self.player_color
+    }
+
+    pub fn ai_color(&self) -> u8 {
+        opponent_of(self.player_color)
     }
 
     fn apply_move(&mut self, pos: usize, is_black: bool) -> Result<(), String> {
@@ -204,6 +223,10 @@ fn opponent_of(player: u8) -> u8 {
     }
 }
 
+fn is_valid_player(player: u8) -> bool {
+    matches!(player, PLAYER_BLACK | PLAYER_WHITE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,7 +249,7 @@ mod tests {
 
     #[test]
     fn initial_state_is_correct() {
-        let game = GameInstance::new_with_default_selector(3);
+        let game = GameInstance::new_with_default_selector(3, PLAYER_BLACK).unwrap();
         let state = game.to_game_state();
 
         assert_eq!(state.current_player, PLAYER_BLACK);
@@ -240,7 +263,7 @@ mod tests {
 
     #[test]
     fn t02_illegal_player_move_returns_error() {
-        let mut game = GameInstance::new_with_default_selector(1);
+        let mut game = GameInstance::new_with_default_selector(1, PLAYER_BLACK).unwrap();
         let err = game.place(0, 0).unwrap_err();
 
         assert!(err.contains("illegal move"));
@@ -248,7 +271,7 @@ mod tests {
 
     #[test]
     fn t03_pass_occurrence_switches_turn() {
-        let mut game = GameInstance::new_with_default_selector(1);
+        let mut game = GameInstance::new_with_default_selector(1, PLAYER_BLACK).unwrap();
         let black = bit(0, 1);
         let white = FULL_BOARD ^ bit(0, 0) ^ black;
         game.set_board_for_test(Board::from_bitboards(black, white), PLAYER_BLACK);
@@ -265,7 +288,7 @@ mod tests {
 
     #[test]
     fn t04_both_passes_end_game() {
-        let mut game = GameInstance::new_with_default_selector(1);
+        let mut game = GameInstance::new_with_default_selector(1, PLAYER_BLACK).unwrap();
         let black = FULL_BOARD ^ bit(0, 0);
         game.set_board_for_test(Board::from_bitboards(black, 0), PLAYER_BLACK);
 
@@ -280,7 +303,8 @@ mod tests {
 
     #[test]
     fn t05_full_board_after_move_sets_game_over() {
-        let mut game = GameInstance::new(1, Box::new(FixedMoveSelector { mv: 0 }));
+        let mut game =
+            GameInstance::new(1, PLAYER_BLACK, Box::new(FixedMoveSelector { mv: 0 })).unwrap();
         let black = bit(0, 1);
         let white = FULL_BOARD ^ bit(0, 0) ^ black;
         game.set_board_for_test(Board::from_bitboards(black, white), PLAYER_WHITE);
@@ -293,5 +317,29 @@ mod tests {
         assert_eq!(state.black_count, 0);
         assert_eq!(state.white_count, 64);
         assert_eq!(state.flipped, vec![1]);
+    }
+
+    #[test]
+    fn white_player_can_join_as_second_mover() {
+        let mut game = GameInstance::new_with_default_selector(2, PLAYER_WHITE).unwrap();
+
+        assert_eq!(game.player_color(), PLAYER_WHITE);
+        assert_eq!(game.ai_color(), PLAYER_BLACK);
+        assert_eq!(game.current_player, PLAYER_BLACK);
+        assert_eq!(game.place(2, 3).unwrap_err(), "it is not the player's turn");
+
+        game.do_ai_move().expect("black AI should open the game");
+
+        assert_eq!(game.current_player, PLAYER_WHITE);
+        assert!(!game.is_game_over);
+        assert!(!game.get_legal_moves().is_empty());
+    }
+
+    #[test]
+    fn invalid_player_color_is_rejected() {
+        let err = GameInstance::new_with_default_selector(1, 0)
+            .err()
+            .expect("invalid player color must fail");
+        assert_eq!(err, "player color must be 1 (black) or 2 (white)");
     }
 }

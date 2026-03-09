@@ -5,7 +5,13 @@ import GameInfo from './components/GameInfo'
 import LevelSelect from './components/LevelSelect'
 import ResultModal from './components/ResultModal'
 import useGame from './hooks/useGame'
-import { PLAYER_BLACK, PLAYER_WHITE, type Player, type Winner } from './types/player'
+import {
+  PLAYER_BLACK,
+  PLAYER_WHITE,
+  playerLabel,
+  type Player,
+  type Winner,
+} from './types/player'
 import workerUrl from './workers/wasm.worker.ts?worker&url'
 
 declare global {
@@ -37,6 +43,7 @@ const toWinner = (value: number): Winner =>
 function App() {
   const [screen, setScreen] = useState<Screen>('level_select')
   const [selectedLevel, setSelectedLevel] = useState(DEFAULT_LEVEL)
+  const [selectedPlayer, setSelectedPlayer] = useState<Player>(PLAYER_BLACK)
   const [initError, setInitError] = useState<string | null>(null)
   const [isResultModalOpen, setIsResultModalOpen] = useState(false)
   const transitionRequestInFlightRef = useRef(false)
@@ -68,7 +75,7 @@ function App() {
     setIsResultModalOpen(false)
 
     try {
-      await startGame(selectedLevel)
+      await startGame(selectedLevel, selectedPlayer)
       setScreen('game')
     } catch (caughtError: unknown) {
       if (isConcurrentRequestError(caughtError)) {
@@ -105,7 +112,7 @@ function App() {
   }
 
   const handleCellClick = (row: number, col: number): void => {
-    if (gameState === null || gameState.current_player !== PLAYER_BLACK || isThinking) {
+    if (gameState === null || gameState.current_player !== selectedPlayer || isThinking) {
       return
     }
 
@@ -148,10 +155,12 @@ function App() {
         <>
           <LevelSelect
             selectedLevel={selectedLevel}
+            selectedPlayer={selectedPlayer}
             startDisabled={initError !== null}
             isLoading={isThinking}
             error={initError}
             onLevelChange={setSelectedLevel}
+            onPlayerChange={setSelectedPlayer}
             onStart={() => {
               void handleStartAttempt()
             }}
@@ -177,7 +186,7 @@ function App() {
             board={board}
             legalMoves={legalMoves}
             flipped={flipped}
-            isPlayerTurn={currentPlayer === PLAYER_BLACK && !isThinking && !isGameOver}
+            isPlayerTurn={currentPlayer === selectedPlayer && !isThinking && !isGameOver}
             onCellClick={handleCellClick}
           />
           <aside className="game-layout__panel">
@@ -185,6 +194,7 @@ function App() {
               blackCount={blackCount}
               whiteCount={whiteCount}
               currentPlayer={currentPlayer}
+              playerColor={selectedPlayer}
               isThinking={isThinking}
               isPass={gameState?.is_pass ?? false}
               isGameOver={isGameOver}
@@ -229,7 +239,7 @@ function App() {
                 }}
                 disabled={isThinking}
               >
-                Restart level {selectedLevel}
+                Restart level {selectedLevel} as {playerLabel(selectedPlayer)}
               </button>
               <button
                 type="button"

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
+import { PLAYER_BLACK, PLAYER_WHITE } from './types/player'
 import type { GameResult, GameState, Position } from './wasm'
 import type { WorkerRequest, WorkerResponse } from './workers/wasm.worker'
 
@@ -90,11 +91,14 @@ describe('App', () => {
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'Level 4' }))
-    await user.click(screen.getByRole('button', { name: 'Start level 4' }))
+    await user.click(screen.getByRole('button', { name: 'Start level 4 as Black' }))
 
     expect(screen.getByRole('button', { name: 'Preparing...' })).toBeDisabled()
 
     const worker = MockWorker.latest()
+    expect(worker.postedMessages[0]).toEqual(
+      expect.objectContaining({ type: 'init_game', payload: { level: 4, player: PLAYER_BLACK } }),
+    )
     const requestId = worker.postedMessages[0].requestId
     expect(typeof requestId).toBe('string')
 
@@ -115,7 +119,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('grid', { name: 'Reversi board' })).toBeInTheDocument()
       expect(screen.getByText('Your turn (Black)')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Restart level 4' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 4 as Black' })).toBeInTheDocument()
     })
   })
 
@@ -123,7 +127,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: 'Start level 3' }))
+    await user.click(screen.getByRole('button', { name: 'Start level 3 as Black' }))
 
     const worker = MockWorker.latest()
     const firstRequestId = worker.postedMessages[0].requestId
@@ -142,7 +146,7 @@ describe('App', () => {
         'モデルデータの読み込みに失敗しました。再試行してください。',
       )
     })
-    expect(screen.getByRole('button', { name: 'Start level 3' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Start level 3 as Black' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Retry initialization' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Retry initialization' }))
@@ -169,7 +173,7 @@ describe('App', () => {
   it('ignores rapid repeated start attempts while the first init request is in flight', () => {
     render(<App />)
 
-    const startButton = screen.getByRole('button', { name: 'Start level 3' })
+    const startButton = screen.getByRole('button', { name: 'Start level 3 as Black' })
     fireEvent.click(startButton)
     fireEvent.click(startButton)
 
@@ -182,7 +186,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: 'Start level 3' }))
+    await user.click(screen.getByRole('button', { name: 'Start level 3 as Black' }))
 
     const worker = MockWorker.latest()
     const initRequestId = worker.postedMessages[0].requestId
@@ -257,10 +261,10 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Show result popup' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Restart level 3' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 3 as Black' })).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: 'Restart level 3' }))
+    await user.click(screen.getByRole('button', { name: 'Restart level 3 as Black' }))
 
     const restartRequestId = worker.postedMessages[2].requestId
     expect(typeof restartRequestId).toBe('string')
@@ -278,7 +282,7 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Game result' })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Restart level 3' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 3 as Black' })).toBeInTheDocument()
     })
   })
 
@@ -286,7 +290,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: 'Start level 3' }))
+    await user.click(screen.getByRole('button', { name: 'Start level 3 as Black' }))
 
     const worker = MockWorker.latest()
     const initRequestId = worker.postedMessages[0].requestId
@@ -327,6 +331,57 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('AI passed. Your turn continues.')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Cell 5-6 legal move' })).toBeInTheDocument()
+    })
+  })
+
+  it('lets the player choose white and waits for the AI opening move', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /Play second/i }))
+    await user.click(screen.getByRole('button', { name: 'Start level 3 as White' }))
+
+    const worker = MockWorker.latest()
+    expect(worker.postedMessages[0]).toEqual(
+      expect.objectContaining({ type: 'init_game', payload: { level: 3, player: PLAYER_WHITE } }),
+    )
+    const requestId = worker.postedMessages[0].requestId
+    expect(typeof requestId).toBe('string')
+
+    act(() => {
+      worker.emitMessage({
+        requestId,
+        type: 'ai_step',
+        payload: {
+          state: makeState({
+            current_player: PLAYER_WHITE,
+            black_count: 4,
+            white_count: 1,
+            flipped: [28],
+          }),
+        },
+      })
+    })
+
+    act(() => {
+      worker.emitMessage({
+        requestId,
+        type: 'game_state',
+        payload: {
+          state: makeState({
+            current_player: PLAYER_WHITE,
+            black_count: 4,
+            white_count: 1,
+          }),
+          moves: makeMoves([{ row: 2, col: 4 }]),
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Your turn (White)')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Restart level 3 as White' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Cell 3-5 legal move' })).toBeInTheDocument()
     })
   })
 })
