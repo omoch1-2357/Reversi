@@ -1,4 +1,5 @@
 use std::sync::LazyLock;
+use std::sync::mpsc;
 use std::time::Instant;
 
 use rand::Rng;
@@ -175,6 +176,25 @@ impl TrainableNTuple {
         &self.weights
     }
 
+    fn merge_weighted(
+        workers: &[(TrainableNTuple, usize)],
+        total_games: usize,
+    ) -> Result<Self, String> {
+        let mut merged = Self::new();
+        if total_games == 0 {
+            return Ok(merged);
+        }
+
+        for (network, games) in workers {
+            if *games == 0 {
+                continue;
+            }
+            merged.accumulate_scaled_from(network, (*games as f32) / (total_games as f32))?;
+        }
+
+        Ok(merged)
+    }
+
     fn phase_index(&self, board: &Board) -> usize {
         phase_index_for_board(board, self.phase_count)
     }
@@ -231,6 +251,48 @@ impl TrainableNTuple {
                 phase_weights[tuple_idx][index] += delta;
             }
         }
+    }
+
+    fn accumulate_scaled_from(&mut self, other: &Self, scale: f32) -> Result<(), String> {
+        if self.phase_count != other.phase_count {
+            return Err(format!(
+                "phase_count mismatch while merging networks: {} vs {}",
+                self.phase_count, other.phase_count
+            ));
+        }
+
+        for (phase_idx, (target_phase, source_phase)) in self
+            .weights
+            .iter_mut()
+            .zip(other.weights.iter())
+            .enumerate()
+        {
+            if target_phase.len() != source_phase.len() {
+                return Err(format!(
+                    "tuple count mismatch while merging phase {phase_idx}: {} vs {}",
+                    target_phase.len(),
+                    source_phase.len()
+                ));
+            }
+
+            for (tuple_idx, (target_weights, source_weights)) in
+                target_phase.iter_mut().zip(source_phase.iter()).enumerate()
+            {
+                if target_weights.len() != source_weights.len() {
+                    return Err(format!(
+                        "weight length mismatch while merging phase {phase_idx}, tuple {tuple_idx}: {} vs {}",
+                        target_weights.len(),
+                        source_weights.len()
+                    ));
+                }
+
+                for (target, source) in target_weights.iter_mut().zip(source_weights.iter()) {
+                    *target += source * scale;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -289,6 +351,12 @@ pub struct TDLambdaTrainer<N> {
     lambda_: f32,
     epsilon: f64,
     rng: ChaCha8Rng,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WorkerMessage {
+    Progress(usize),
+    Done,
 }
 
 impl<N: TrainingNetwork> TDLambdaTrainer<N> {
@@ -499,13 +567,187 @@ pub fn train_to_bytes(
     lambda_: f32,
     epsilon: f64,
     seed: u64,
+    threads: usize,
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<Vec<u8>, String> {
+    let network = train_network(
+        games,
+        alpha,
+        lambda_,
+        epsilon,
+        seed,
+        threads,
+        progress_interval,
+        progress_callback,
+    )?;
+    network.to_bytes()
+}
+
+fn train_network(
+    games: usize,
+    alpha: f32,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    threads: usize,
+    progress_interval: usize,
+    progress_callback: Option<ProgressCallback<'_>>,
+) -> Result<TrainableNTuple, String> {
+    let resolved_threads = resolve_thread_count(threads);
+    let active_threads = resolved_threads.min(games.max(1));
+
+    if active_threads <= 1 || games == 0 {
+        return train_network_sequential(
+            games,
+            alpha,
+            lambda_,
+            epsilon,
+            seed,
+            progress_interval,
+            progress_callback,
+        );
+    }
+
+    train_network_parallel(
+        games,
+        alpha,
+        lambda_,
+        epsilon,
+        seed,
+        active_threads,
+        progress_interval,
+        progress_callback,
+    )
+}
+
+fn train_network_sequential(
+    games: usize,
+    alpha: f32,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    progress_interval: usize,
+    progress_callback: Option<ProgressCallback<'_>>,
+) -> Result<TrainableNTuple, String> {
     let network = TrainableNTuple::new();
     let mut trainer = TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed)?;
     trainer.train(games, progress_interval, progress_callback)?;
-    trainer.into_network().to_bytes()
+    Ok(trainer.into_network())
+}
+
+fn train_network_parallel(
+    games: usize,
+    alpha: f32,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    threads: usize,
+    progress_interval: usize,
+    mut progress_callback: Option<ProgressCallback<'_>>,
+) -> Result<TrainableNTuple, String> {
+    let worker_game_counts = split_games(games, threads);
+    let worker_progress_interval = if progress_interval == 0 {
+        0
+    } else {
+        (progress_interval / threads).max(1)
+    };
+    let start_time = Instant::now();
+    let (tx, rx) = mpsc::channel::<WorkerMessage>();
+
+    std::thread::scope(|scope| -> Result<TrainableNTuple, String> {
+        let mut handles = Vec::with_capacity(worker_game_counts.len());
+        for (worker_idx, worker_games) in worker_game_counts.iter().copied().enumerate() {
+            let worker_tx = tx.clone();
+            handles.push(
+                scope.spawn(move || -> Result<(TrainableNTuple, usize), String> {
+                    let result = train_worker_network(
+                        worker_games,
+                        alpha,
+                        lambda_,
+                        epsilon,
+                        worker_seed(seed, worker_idx),
+                        worker_progress_interval,
+                        worker_tx.clone(),
+                    );
+                    let _ = worker_tx.send(WorkerMessage::Done);
+                    result.map(|network| (network, worker_games))
+                }),
+            );
+        }
+        drop(tx);
+
+        let mut completed_games = 0usize;
+        let mut last_reported = 0usize;
+        let mut finished_workers = 0usize;
+        while finished_workers < worker_game_counts.len() {
+            match rx
+                .recv()
+                .map_err(|_| "training worker progress channel closed unexpectedly".to_string())?
+            {
+                WorkerMessage::Progress(delta) => {
+                    completed_games = completed_games.saturating_add(delta);
+                    if let Some(callback) = progress_callback.as_mut()
+                        && progress_interval > 0
+                        && (completed_games - last_reported >= progress_interval
+                            || completed_games == games)
+                    {
+                        last_reported = completed_games;
+                        callback(completed_games, games, start_time.elapsed().as_secs_f64())?;
+                    }
+                }
+                WorkerMessage::Done => finished_workers += 1,
+            }
+        }
+
+        if let Some(callback) = progress_callback.as_mut()
+            && progress_interval > 0
+            && last_reported != games
+        {
+            callback(games, games, start_time.elapsed().as_secs_f64())?;
+        }
+
+        let mut workers = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let worker = handle
+                .join()
+                .map_err(|_| "training worker thread panicked".to_string())??;
+            workers.push(worker);
+        }
+        TrainableNTuple::merge_weighted(&workers, games)
+    })
+}
+
+fn train_worker_network(
+    games: usize,
+    alpha: f32,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    progress_interval: usize,
+    progress_tx: mpsc::Sender<WorkerMessage>,
+) -> Result<TrainableNTuple, String> {
+    let network = TrainableNTuple::new();
+    let mut trainer = TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed)?;
+
+    if progress_interval > 0 {
+        let mut reported = 0usize;
+        let mut progress = |completed: usize, _total: usize, _elapsed: f64| -> Result<(), String> {
+            let delta = completed.saturating_sub(reported);
+            reported = completed;
+            if delta > 0 {
+                progress_tx
+                    .send(WorkerMessage::Progress(delta))
+                    .map_err(|_| "failed to send worker progress".to_string())?;
+            }
+            Ok(())
+        };
+        trainer.train(games, progress_interval, Some(&mut progress))?;
+    } else {
+        trainer.train(games, 0, None)?;
+    }
+
+    Ok(trainer.into_network())
 }
 
 fn nth_move_from_mask(mask: u64, target: u32) -> usize {
@@ -567,6 +809,29 @@ fn terminal_training_score(board: &Board, is_black: bool) -> f32 {
     } else {
         white_count as f32 - black_count as f32
     }
+}
+
+fn resolve_thread_count(threads: usize) -> usize {
+    if threads == 0 {
+        std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get())
+            .unwrap_or(1)
+    } else {
+        threads
+    }
+}
+
+fn split_games(games: usize, threads: usize) -> Vec<usize> {
+    let base = games / threads;
+    let remainder = games % threads;
+    (0..threads)
+        .map(|idx| base + usize::from(idx < remainder))
+        .collect()
+}
+
+fn worker_seed(base_seed: u64, worker_idx: usize) -> u64 {
+    const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+    base_seed.wrapping_add(GOLDEN_GAMMA.wrapping_mul((worker_idx as u64) + 1))
 }
 
 fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
@@ -792,7 +1057,7 @@ mod tests {
 
     #[test]
     fn train_to_bytes_writes_v2_header_with_phase_count() {
-        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 0, None).unwrap();
+        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, 0, None).unwrap();
         let bytes = decompress_model_bytes(&bytes).unwrap();
         assert_eq!(&bytes[0..4], MAGIC);
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), VERSION);
@@ -804,10 +1069,30 @@ mod tests {
 
     #[test]
     fn exported_bytes_are_readable_by_inference_evaluator() {
-        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 0, None).unwrap();
+        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, 0, None).unwrap();
         let evaluator = NTupleEvaluator::from_bytes(&bytes).unwrap();
         let score = evaluator.evaluate(&Board::new(), true);
         assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn split_games_distributes_remainder_to_earliest_workers() {
+        assert_eq!(split_games(10, 3), vec![4, 3, 3]);
+        assert_eq!(split_games(2, 4), vec![1, 1, 0, 0]);
+    }
+
+    #[test]
+    fn resolve_thread_count_zero_uses_available_parallelism() {
+        assert!(resolve_thread_count(0) >= 1);
+        assert_eq!(resolve_thread_count(3), 3);
+    }
+
+    #[test]
+    fn parallel_training_is_reproducible_for_fixed_seed_and_thread_count() {
+        let first = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, 0, None).unwrap();
+        let second = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, 0, None).unwrap();
+
+        assert_eq!(first, second);
     }
 
     struct CountingNetwork {

@@ -89,6 +89,7 @@ foreach ($arg in $TrainArgs) {
 }
 
 Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--games" -Value "500000"
+Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--threads" -Value "0"
 Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--progress-interval" -Value "10000"
 Add-DefaultCliOption -OptionArgs $resolvedArgs -LongOption "--output" -Value "rust/src/ai/weights.bin"
 

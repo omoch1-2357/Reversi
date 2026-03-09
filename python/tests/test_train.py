@@ -34,6 +34,8 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
             "out.bin",
             "--seed",
             "2026",
+            "--threads",
+            "0",
             "--progress-interval",
             "25",
         ]
@@ -45,6 +47,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
     assert args.epsilon == pytest.approx(0.05)
     assert str(args.output) == "out.bin"
     assert args.seed == 2026
+    assert args.threads == 0
     assert args.progress_interval == 25
 
 
@@ -106,8 +109,14 @@ def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
 
         assert exit_code == 0
         captured = capsys.readouterr()
+        assert "threads=0" in captured.out
         assert "progress_interval=2" in captured.out
         assert "[progress] 2/3 games" in captured.out
         assert "[progress] 3/3 games" in captured.out
     finally:
         output.unlink(missing_ok=True)
+
+
+def test_parser_defaults_threads_to_zero() -> None:
+    args = build_parser().parse_args([])
+    assert args.threads == 0

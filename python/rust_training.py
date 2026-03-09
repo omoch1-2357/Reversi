@@ -31,21 +31,34 @@ def train_to_bytes(
     lambda_: float,
     epsilon: float,
     seed: int,
+    threads: int,
     progress_interval: int,
     progress_callback: ProgressCallback | None = None,
 ) -> bytes:
     module = _load_extension()
-    return bytes(
-        module.train_to_bytes(
-            games=games,
-            alpha=alpha,
-            lambda_=lambda_,
-            epsilon=epsilon,
-            seed=seed,
-            progress_interval=progress_interval,
-            progress_callback=progress_callback,
-        )
+    kwargs = dict(
+        games=games,
+        alpha=alpha,
+        lambda_=lambda_,
+        epsilon=epsilon,
+        seed=seed,
+        threads=threads,
+        progress_interval=progress_interval,
+        progress_callback=progress_callback,
     )
+    try:
+        return bytes(module.train_to_bytes(**kwargs))
+    except TypeError as exc:
+        if "threads" not in str(exc):
+            raise
+        if threads != 1:
+            raise RuntimeError(
+                "Installed Rust training extension does not support `threads`. "
+                "Rebuild and reinstall the extension before using parallel training."
+            ) from exc
+
+        kwargs.pop("threads")
+        return bytes(module.train_to_bytes(**kwargs))
 
 
 def compress_model_bytes(data: bytes) -> bytes:

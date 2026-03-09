@@ -20,6 +20,7 @@ def test_train_to_bytes_raises_clear_error_when_extension_is_missing(
             lambda_=0.7,
             epsilon=0.1,
             seed=42,
+            threads=1,
             progress_interval=0,
         )
 
@@ -37,6 +38,7 @@ def test_train_to_bytes_propagates_internal_import_error(monkeypatch) -> None:
             lambda_=0.7,
             epsilon=0.1,
             seed=42,
+            threads=1,
             progress_interval=0,
         )
 
@@ -65,6 +67,7 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
         lambda_=0.8,
         epsilon=0.05,
         seed=99,
+        threads=0,
         progress_interval=2,
         progress_callback=progress_callback,
     )
@@ -75,6 +78,7 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     assert captured["lambda_"] == pytest.approx(0.8)
     assert captured["epsilon"] == pytest.approx(0.05)
     assert captured["seed"] == 99
+    assert captured["threads"] == 0
     assert captured["progress_interval"] == 2
     assert captured["progress_callback"] is progress_callback
     assert callback_calls == [(1, 3, 0.25)]
@@ -104,3 +108,60 @@ def test_model_byte_helpers_delegate_to_extension(monkeypatch) -> None:
     assert rust_training.decompress_model_bytes(b"compressed") == b"raw-model"
     assert captured["compress"] == b"raw"
     assert captured["decompress"] == b"compressed"
+
+
+def test_train_to_bytes_falls_back_for_legacy_extension_when_threads_is_one(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _train_to_bytes(**kwargs):
+        if "threads" in kwargs:
+            raise TypeError(
+                "train_to_bytes() got an unexpected keyword argument 'threads'"
+            )
+        captured.update(kwargs)
+        return b"legacy-model"
+
+    monkeypatch.setattr(
+        rust_training,
+        "import_module",
+        lambda _name: SimpleNamespace(train_to_bytes=_train_to_bytes),
+    )
+
+    payload = rust_training.train_to_bytes(
+        games=1,
+        alpha=0.01,
+        lambda_=0.7,
+        epsilon=0.1,
+        seed=42,
+        threads=1,
+        progress_interval=0,
+    )
+
+    assert payload == b"legacy-model"
+    assert "threads" not in captured
+
+
+def test_train_to_bytes_rejects_parallel_threads_with_legacy_extension(
+    monkeypatch,
+) -> None:
+    def _train_to_bytes(**kwargs):
+        raise TypeError("train_to_bytes() got an unexpected keyword argument 'threads'")
+
+    monkeypatch.setattr(
+        rust_training,
+        "import_module",
+        lambda _name: SimpleNamespace(train_to_bytes=_train_to_bytes),
+    )
+
+    with pytest.raises(RuntimeError, match="does not support `threads`"):
+        rust_training.train_to_bytes(
+            games=1,
+            alpha=0.01,
+            lambda_=0.7,
+            epsilon=0.1,
+            seed=42,
+            threads=2,
+            progress_interval=0,
+        )

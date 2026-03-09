@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducible training runs.",
     )
     parser.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        help="Training worker threads (0 uses the maximum available CPU count).",
+    )
+    parser.add_argument(
         "--progress-interval",
         type=int,
         default=10_000,
@@ -147,11 +153,14 @@ def train_and_export(
     epsilon: float,
     output: Path,
     seed: int,
+    threads: int,
     progress_interval: int,
 ) -> Path:
     """Run training, export the model, and validate the resulting binary."""
     if games < 0:
         raise ValueError(f"games must be >= 0, got {games}")
+    if threads < 0:
+        raise ValueError(f"threads must be >= 0, got {threads}")
     if progress_interval < 0:
         raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")
 
@@ -164,6 +173,7 @@ def train_and_export(
         lambda_=lambda_,
         epsilon=epsilon,
         seed=seed,
+        threads=threads,
         progress_interval=progress_interval,
         progress_callback=log_training_progress,
     )
@@ -180,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Training with "
             f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
-            f"epsilon={args.epsilon}, seed={args.seed}, "
+            f"epsilon={args.epsilon}, seed={args.seed}, threads={args.threads}, "
             f"progress_interval={args.progress_interval}"
         )
         start_time = perf_counter()
@@ -191,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             epsilon=args.epsilon,
             output=args.output,
             seed=args.seed,
+            threads=args.threads,
             progress_interval=args.progress_interval,
         )
         print(

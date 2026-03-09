@@ -533,7 +533,7 @@ pub struct GameResult {
 graph TD
     TRAIN[train.py<br/>Python CLI] --> PY_BRIDGE[rust_training.py<br/>拡張ローダ]
     PY_BRIDGE --> PYO3[PyO3拡張<br/>rust_training_ext]
-    PYO3 --> RUST_TRAIN[training.rs<br/>自己対戦 + TD-Lambda]
+    PYO3 --> RUST_TRAIN[training.rs<br/>並列自己対戦 + TD-Lambda]
     RUST_TRAIN --> BIN[weights.bin<br/>CRC32付き]
 ```
 
@@ -718,6 +718,7 @@ def main():
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--lambda", type=float, default=0.7, dest="lambda_")
     parser.add_argument("--epsilon", type=float, default=0.1)
+    parser.add_argument("--threads", type=int, default=1)  # 0=利用可能CPU数
     parser.add_argument("--output", type=str, default="weights.bin")
     args = parser.parse_args()
 
@@ -728,6 +729,7 @@ def main():
         lambda_=args.lambda_,
         epsilon=args.epsilon,
         seed=args.seed,
+        threads=args.threads,
         progress_interval=args.progress_interval,
     )
     with open(args.output, "wb") as f:
@@ -1084,7 +1086,7 @@ Reversi/
 │           └── weights.bin      # 学習済みモデル（include_bytes!対象）
 ├── python/
 │   ├── requirements.txt         # numpy, pytest, ruff
-│   ├── train.py                 # 学習エントリポイント（CLI引数: --games, --alpha等）
+│   ├── train.py                 # 学習エントリポイント（CLI引数: --games, --threads等）
 │   ├── rust_training.py         # Rust拡張ローダ
 │   ├── rust_training_ext/       # PyO3 拡張クレート
 │   ├── board.py                 # Python仕様参照用 Board クラス

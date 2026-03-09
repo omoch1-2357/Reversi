@@ -65,6 +65,9 @@ train_args=("$@")
 if ! has_cli_option "--games" "${train_args[@]}"; then
   train_args+=("--games" "500000")
 fi
+if ! has_cli_option "--threads" "${train_args[@]}"; then
+  train_args+=("--threads" "0")
+fi
 if ! has_cli_option "--progress-interval" "${train_args[@]}"; then
   train_args+=("--progress-interval" "10000")
 fi

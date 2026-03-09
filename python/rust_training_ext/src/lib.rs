@@ -7,6 +7,7 @@ use pyo3::prelude::*;
     lambda_ = 0.7,
     epsilon = 0.1,
     seed = 42,
+    threads = 1,
     progress_interval = 0,
     progress_callback = None
 ))]
@@ -17,6 +18,7 @@ fn train_to_bytes(
     lambda_: f32,
     epsilon: f64,
     seed: u64,
+    threads: usize,
     progress_interval: usize,
     progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<Vec<u8>> {
@@ -43,6 +45,7 @@ fn train_to_bytes(
                 lambda_,
                 epsilon,
                 seed,
+                threads,
                 progress_interval,
                 Some(&mut progress),
             )
@@ -53,6 +56,7 @@ fn train_to_bytes(
                 lambda_,
                 epsilon,
                 seed,
+                threads,
                 progress_interval,
                 None,
             )
