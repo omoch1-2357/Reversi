@@ -378,9 +378,9 @@ mod tests {
         let second = run_tie_break_step();
 
         assert_eq!(first.expected_index, second.expected_index);
-        assert_eq!(first.chosen_index, first.expected_index);
-        assert_eq!(second.chosen_index, second.expected_index);
-        assert_eq!(first.chosen_index, second.chosen_index);
+        assert_eq!(first.chosen_key, first.expected_index);
+        assert_eq!(second.chosen_key, second.expected_index);
+        assert_eq!(first.chosen_key, second.chosen_key);
     }
 
     fn play_one_opening_and_ai_step(level: u8) -> GameState {
@@ -618,7 +618,7 @@ mod tests {
 
     #[derive(Debug, Clone, Copy)]
     struct TieBreakResult {
-        chosen_index: usize,
+        chosen_key: usize,
         expected_index: usize,
     }
 
@@ -652,7 +652,7 @@ mod tests {
             .expect("exactly one newly placed white stone should exist");
 
         TieBreakResult {
-            chosen_index,
+            chosen_key: canonical_move_index(chosen_index, &before),
             expected_index,
         }
     }
