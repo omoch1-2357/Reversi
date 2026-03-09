@@ -686,29 +686,46 @@ mod tests {
     }
 
     fn canonical_symmetry(board: &[u8]) -> u8 {
+        let (black, white) = board_to_bitboards(board);
         let mut best = None;
 
         for symmetry in 0..8u8 {
-            let transformed = transform_board(board, symmetry);
-            if best
-                .as_ref()
-                .is_none_or(|(current, current_sym): &(Vec<u8>, u8)| {
-                    transformed < *current || (transformed == *current && symmetry < *current_sym)
-                })
-            {
-                best = Some((transformed, symmetry));
+            let transformed = (
+                transform_bitboard(black, symmetry),
+                transform_bitboard(white, symmetry),
+                symmetry,
+            );
+            if best.is_none_or(|current| transformed < current) {
+                best = Some(transformed);
             }
         }
 
-        best.expect("at least one symmetry must exist").1
+        best.expect("at least one symmetry must exist").2
     }
 
-    fn transform_board(board: &[u8], symmetry: u8) -> Vec<u8> {
-        let mut transformed = vec![0u8; 64];
+    fn board_to_bitboards(board: &[u8]) -> (u64, u64) {
+        let mut black = 0u64;
+        let mut white = 0u64;
+
         for (pos, value) in board.iter().copied().enumerate() {
-            transformed[transform_pos(pos, symmetry)] = value;
+            match value {
+                1 => black |= 1u64 << pos,
+                2 => white |= 1u64 << pos,
+                _ => {}
+            }
         }
-        transformed
+
+        (black, white)
+    }
+
+    fn transform_bitboard(mut bits: u64, symmetry: u8) -> u64 {
+        let mut out = 0u64;
+        while bits != 0 {
+            let pos = bits.trailing_zeros() as usize;
+            out |= 1u64 << transform_pos(pos, symmetry);
+            bits &= bits - 1;
+        }
+        out
     }
 
     fn transform_pos(pos: usize, symmetry: u8) -> usize {
