@@ -32,6 +32,8 @@ def train_to_bytes(
     epsilon: float,
     seed: int,
     threads: int,
+    initial_model: bytes | None,
+    random_opening_plies: int,
     progress_interval: int,
     progress_callback: ProgressCallback | None = None,
 ) -> bytes:
@@ -46,6 +48,10 @@ def train_to_bytes(
         progress_interval=progress_interval,
         progress_callback=progress_callback,
     )
+    if initial_model is not None:
+        kwargs["initial_model"] = bytes(initial_model)
+    if random_opening_plies != 0:
+        kwargs["random_opening_plies"] = random_opening_plies
     try:
         return bytes(module.train_to_bytes(**kwargs))
     except TypeError as exc:

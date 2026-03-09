@@ -21,6 +21,8 @@ def test_train_to_bytes_raises_clear_error_when_extension_is_missing(
             epsilon=0.1,
             seed=42,
             threads=1,
+            initial_model=None,
+            random_opening_plies=0,
             progress_interval=0,
         )
 
@@ -39,6 +41,8 @@ def test_train_to_bytes_propagates_internal_import_error(monkeypatch) -> None:
             epsilon=0.1,
             seed=42,
             threads=1,
+            initial_model=None,
+            random_opening_plies=0,
             progress_interval=0,
         )
 
@@ -68,6 +72,8 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
         epsilon=0.05,
         seed=99,
         threads=0,
+        initial_model=b"checkpoint-bytes",
+        random_opening_plies=4,
         progress_interval=2,
         progress_callback=progress_callback,
     )
@@ -79,6 +85,8 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     assert captured["epsilon"] == pytest.approx(0.05)
     assert captured["seed"] == 99
     assert captured["threads"] == 0
+    assert captured["initial_model"] == b"checkpoint-bytes"
+    assert captured["random_opening_plies"] == 4
     assert captured["progress_interval"] == 2
     assert captured["progress_callback"] is progress_callback
     assert callback_calls == [(1, 3, 0.25)]
@@ -136,6 +144,8 @@ def test_train_to_bytes_falls_back_for_legacy_extension_when_threads_is_one(
         epsilon=0.1,
         seed=42,
         threads=1,
+        initial_model=None,
+        random_opening_plies=0,
         progress_interval=0,
     )
 
@@ -163,5 +173,7 @@ def test_train_to_bytes_rejects_parallel_threads_with_legacy_extension(
             epsilon=0.1,
             seed=42,
             threads=2,
+            initial_model=None,
+            random_opening_plies=0,
             progress_interval=0,
         )

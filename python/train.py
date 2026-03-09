@@ -56,6 +56,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=10_000,
         help="Emit progress every N games (0 disables periodic logs).",
     )
+    parser.add_argument(
+        "--random-opening-plies",
+        type=int,
+        default=0,
+        help="Apply N random plies before learned self-play begins.",
+    )
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=0,
+        help="Save a checkpoint every N newly trained games (0 disables checkpoints).",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=None,
+        help="Directory used for checkpoint files. Defaults next to the output path.",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        help="Optional existing weights.bin to continue training from.",
+    )
     return parser
 
 
@@ -146,6 +170,16 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
         )
 
 
+def checkpoint_path_for(
+    output: Path, checkpoint_dir: Path, completed_games: int
+) -> Path:
+    """Build a stable checkpoint filename for the current training chunk."""
+    suffix = "".join(output.suffixes) or ".bin"
+    stem = output.name[: -len(suffix)] if output.name.endswith(suffix) else output.stem
+    filename = f"{stem}.checkpoint-{completed_games:07d}{suffix}"
+    return checkpoint_dir / filename
+
+
 def train_and_export(
     games: int,
     alpha: float,
@@ -154,30 +188,92 @@ def train_and_export(
     output: Path,
     seed: int,
     threads: int,
+    random_opening_plies: int,
     progress_interval: int,
+    checkpoint_interval: int,
+    checkpoint_dir: Path | None,
+    resume_from: Path | None,
 ) -> Path:
     """Run training, export the model, and validate the resulting binary."""
     if games < 0:
         raise ValueError(f"games must be >= 0, got {games}")
     if threads < 0:
         raise ValueError(f"threads must be >= 0, got {threads}")
+    if random_opening_plies < 0:
+        raise ValueError(
+            f"random_opening_plies must be >= 0, got {random_opening_plies}"
+        )
     if progress_interval < 0:
         raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")
+    if checkpoint_interval < 0:
+        raise ValueError(f"checkpoint_interval must be >= 0, got {checkpoint_interval}")
 
     output_path = output
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    current_model = None
+    if resume_from is not None:
+        verify_exported_model(resume_from, NTupleNetwork.TUPLE_PATTERNS)
+        current_model = resume_from.read_bytes()
 
-    model_bytes = train_to_bytes(
-        games=games,
-        alpha=alpha,
-        lambda_=lambda_,
-        epsilon=epsilon,
-        seed=seed,
-        threads=threads,
-        progress_interval=progress_interval,
-        progress_callback=log_training_progress,
-    )
-    output_path.write_bytes(model_bytes)
+    if checkpoint_interval == 0 or games == 0:
+        model_bytes = train_to_bytes(
+            games=games,
+            alpha=alpha,
+            lambda_=lambda_,
+            epsilon=epsilon,
+            seed=seed,
+            threads=threads,
+            initial_model=current_model,
+            random_opening_plies=random_opening_plies,
+            progress_interval=progress_interval,
+            progress_callback=log_training_progress,
+        )
+        output_path.write_bytes(model_bytes)
+        verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
+        return output_path
+
+    resolved_checkpoint_dir = checkpoint_dir
+    if resolved_checkpoint_dir is None:
+        resolved_checkpoint_dir = output_path.parent / f"{output_path.stem}.checkpoints"
+    resolved_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    completed_games = 0
+    started_at = perf_counter()
+    while completed_games < games:
+        chunk_games = min(checkpoint_interval, games - completed_games)
+
+        def on_progress(done: int, _total: int, _elapsed: float) -> None:
+            log_training_progress(
+                completed_games + done,
+                games,
+                perf_counter() - started_at,
+            )
+
+        current_model = train_to_bytes(
+            games=chunk_games,
+            alpha=alpha,
+            lambda_=lambda_,
+            epsilon=epsilon,
+            seed=seed + completed_games,
+            threads=threads,
+            initial_model=current_model,
+            random_opening_plies=random_opening_plies,
+            progress_interval=min(progress_interval, chunk_games)
+            if progress_interval > 0
+            else 0,
+            progress_callback=on_progress,
+        )
+        completed_games += chunk_games
+
+        checkpoint_path = checkpoint_path_for(
+            output_path,
+            resolved_checkpoint_dir,
+            completed_games,
+        )
+        checkpoint_path.write_bytes(current_model)
+        verify_exported_model(checkpoint_path, NTupleNetwork.TUPLE_PATTERNS)
+
+    output_path.write_bytes(current_model)
     verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
     return output_path
 
@@ -191,7 +287,10 @@ def main(argv: list[str] | None = None) -> int:
             "Training with "
             f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
             f"epsilon={args.epsilon}, seed={args.seed}, threads={args.threads}, "
-            f"progress_interval={args.progress_interval}"
+            f"progress_interval={args.progress_interval}, "
+            f"random_opening_plies={args.random_opening_plies}, "
+            f"checkpoint_interval={args.checkpoint_interval}, "
+            f"resume_from={args.resume_from}"
         )
         start_time = perf_counter()
         output_path = train_and_export(
@@ -202,7 +301,11 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output,
             seed=args.seed,
             threads=args.threads,
+            random_opening_plies=args.random_opening_plies,
             progress_interval=args.progress_interval,
+            checkpoint_interval=args.checkpoint_interval,
+            checkpoint_dir=args.checkpoint_dir,
+            resume_from=args.resume_from,
         )
         print(
             f"Model exported and verified: {output_path} "

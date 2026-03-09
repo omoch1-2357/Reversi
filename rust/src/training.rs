@@ -6,7 +6,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::ai::ntuple::compress_model_bytes;
+use crate::ai::ntuple::{compress_model_bytes, decompress_model_bytes};
 use crate::board::Board;
 
 pub type ProgressCallback<'a> = &'a mut dyn FnMut(usize, usize, f64) -> Result<(), String>;
@@ -30,6 +30,7 @@ pub const TUPLE_PATTERNS: &[&[u8]] = &[
 
 const MAGIC: &[u8; 4] = b"NTRV";
 const VERSION: u32 = 3;
+const HEADER_SIZE: usize = 20;
 const SYMMETRY_COUNT: usize = 8;
 const TUPLE_COUNT: usize = 14;
 const MAX_TUPLE_LEN: usize = 10;
@@ -109,6 +110,11 @@ impl TrainableNTuple {
             phase_count: PHASE_COUNT,
             weights: vec![template; PHASE_COUNT],
         }
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
+        let bytes = decompress_model_bytes(data)?;
+        Self::from_uncompressed_bytes(bytes.as_ref())
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
@@ -198,6 +204,122 @@ impl TrainableNTuple {
 
     fn phase_index(&self, board: &Board) -> usize {
         phase_index_for_board(board, self.phase_count)
+    }
+
+    fn from_uncompressed_bytes(data: &[u8]) -> Result<Self, String> {
+        if data.len() < HEADER_SIZE {
+            return Err(format!(
+                "weights data too short: expected at least {HEADER_SIZE} bytes, got {}",
+                data.len()
+            ));
+        }
+
+        if &data[0..4] != MAGIC {
+            return Err("invalid weights magic (expected NTRV)".to_string());
+        }
+
+        let version = read_u32_le(data, 4)?;
+        if version != VERSION {
+            return Err(format!(
+                "unsupported training weights version: expected {VERSION}, got {version}"
+            ));
+        }
+
+        let num_tuples = read_u32_le(data, 8)? as usize;
+        if num_tuples != TUPLE_PATTERNS.len() {
+            return Err(format!(
+                "tuple count mismatch: expected {}, got {}",
+                TUPLE_PATTERNS.len(),
+                num_tuples
+            ));
+        }
+
+        let expected_crc = read_u32_le(data, 12)?;
+        let phase_count = read_u32_le(data, 16)? as usize;
+        if phase_count != PHASE_COUNT {
+            return Err(format!(
+                "phase_count mismatch: expected {PHASE_COUNT}, got {phase_count}"
+            ));
+        }
+
+        let payload = &data[HEADER_SIZE..];
+        let actual_crc = crc32fast::hash(payload);
+        if actual_crc != expected_crc {
+            return Err(format!(
+                "CRC32 mismatch: expected {expected_crc:#010x}, got {actual_crc:#010x}"
+            ));
+        }
+
+        let mut offset = 0usize;
+        for (tuple_idx, pattern) in TUPLE_PATTERNS.iter().enumerate() {
+            if offset >= payload.len() {
+                return Err(format!(
+                    "unexpected EOF while reading tuple definition #{tuple_idx}"
+                ));
+            }
+
+            let tuple_size = payload[offset] as usize;
+            offset += 1;
+            if tuple_size != pattern.len() {
+                return Err(format!(
+                    "tuple_size mismatch at index {tuple_idx}: expected {}, got {tuple_size}",
+                    pattern.len()
+                ));
+            }
+
+            let end = offset + tuple_size;
+            if end > payload.len() {
+                return Err(format!(
+                    "unexpected EOF while reading tuple positions #{tuple_idx}"
+                ));
+            }
+
+            if &payload[offset..end] != *pattern {
+                return Err(format!(
+                    "tuple positions mismatch at index {tuple_idx}: expected {:?}, got {:?}",
+                    pattern,
+                    &payload[offset..end]
+                ));
+            }
+            offset = end;
+        }
+
+        let mut weights = Vec::with_capacity(PHASE_COUNT);
+        for phase_idx in 0..PHASE_COUNT {
+            let mut phase_weights = Vec::with_capacity(TUPLE_PATTERNS.len());
+            for (tuple_idx, pattern) in TUPLE_PATTERNS.iter().enumerate() {
+                let entries = pow3(pattern.len())?;
+                let bytes_len = entries
+                    .checked_mul(std::mem::size_of::<f32>())
+                    .ok_or_else(|| "weights byte length overflow".to_string())?;
+                if offset + bytes_len > payload.len() {
+                    return Err(format!(
+                        "unexpected EOF while reading weights for phase #{phase_idx}, tuple #{tuple_idx}"
+                    ));
+                }
+
+                let mut tuple_weights = Vec::with_capacity(entries);
+                for entry_idx in 0..entries {
+                    let start = offset + entry_idx * std::mem::size_of::<f32>();
+                    let mut chunk = [0u8; 4];
+                    chunk.copy_from_slice(&payload[start..start + 4]);
+                    tuple_weights.push(f32::from_le_bytes(chunk));
+                }
+
+                phase_weights.push(tuple_weights);
+                offset += bytes_len;
+            }
+            weights.push(phase_weights);
+        }
+
+        if offset != payload.len() {
+            return Err("weights payload has trailing bytes".to_string());
+        }
+
+        Ok(Self {
+            phase_count,
+            weights,
+        })
     }
 
     fn compute_feature_indices(
@@ -355,6 +477,7 @@ pub struct TDLambdaTrainer<N> {
     alpha: f32,
     lambda_: f32,
     epsilon: f64,
+    random_opening_plies: usize,
     rng: ChaCha8Rng,
 }
 
@@ -371,6 +494,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         lambda_: f32,
         epsilon: f64,
         seed: u64,
+        random_opening_plies: usize,
     ) -> Result<Self, String> {
         if alpha < 0.0 {
             return Err(format!("alpha must be >= 0.0, got {alpha}"));
@@ -387,6 +511,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             alpha,
             lambda_,
             epsilon,
+            random_opening_plies,
             rng: ChaCha8Rng::seed_from_u64(seed),
         })
     }
@@ -426,6 +551,13 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let mut consecutive_passes = 0usize;
         let mut history: Vec<(Board, bool)> = Vec::with_capacity(60);
 
+        self.apply_random_opening(
+            &mut board,
+            &mut is_black,
+            &mut consecutive_passes,
+            &mut history,
+        )?;
+
         while consecutive_passes < 2 {
             let legal = board.legal_moves(is_black);
             if legal == 0 {
@@ -445,6 +577,37 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         }
 
         self.update_weights(&history, &board);
+        Ok(())
+    }
+
+    fn apply_random_opening(
+        &mut self,
+        board: &mut Board,
+        is_black: &mut bool,
+        consecutive_passes: &mut usize,
+        history: &mut Vec<(Board, bool)>,
+    ) -> Result<(), String> {
+        let mut applied_plies = 0usize;
+        while applied_plies < self.random_opening_plies && *consecutive_passes < 2 {
+            let legal = board.legal_moves(*is_black);
+            if legal == 0 {
+                *consecutive_passes += 1;
+                *is_black = !*is_black;
+                continue;
+            }
+
+            *consecutive_passes = 0;
+            let choice = self.rng.gen_range(0..legal.count_ones());
+            let mv = nth_move_from_mask(legal, choice);
+            history.push((*board, *is_black));
+            let flipped = board.place(mv, *is_black);
+            if flipped == 0 {
+                return Err(format!("selected illegal random opening move: {mv}"));
+            }
+            *is_black = !*is_black;
+            applied_plies += 1;
+        }
+
         Ok(())
     }
 
@@ -573,6 +736,8 @@ pub fn train_to_bytes(
     epsilon: f64,
     seed: u64,
     threads: usize,
+    initial_model: Option<&[u8]>,
+    random_opening_plies: usize,
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<Vec<u8>, String> {
@@ -583,6 +748,8 @@ pub fn train_to_bytes(
         epsilon,
         seed,
         threads,
+        initial_model,
+        random_opening_plies,
         progress_interval,
         progress_callback,
     )?;
@@ -596,58 +763,73 @@ fn train_network(
     epsilon: f64,
     seed: u64,
     threads: usize,
+    initial_model: Option<&[u8]>,
+    random_opening_plies: usize,
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<TrainableNTuple, String> {
+    let base_network = if let Some(bytes) = initial_model {
+        TrainableNTuple::from_bytes(bytes)?
+    } else {
+        TrainableNTuple::new()
+    };
     let resolved_threads = resolve_thread_count(threads);
     let active_threads = resolved_threads.min(games.max(1));
 
     if active_threads <= 1 || games == 0 {
         return train_network_sequential(
+            base_network,
             games,
             alpha,
             lambda_,
             epsilon,
             seed,
+            random_opening_plies,
             progress_interval,
             progress_callback,
         );
     }
 
     train_network_parallel(
+        base_network,
         games,
         alpha,
         lambda_,
         epsilon,
         seed,
         active_threads,
+        random_opening_plies,
         progress_interval,
         progress_callback,
     )
 }
 
 fn train_network_sequential(
+    network: TrainableNTuple,
     games: usize,
     alpha: f32,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
+    random_opening_plies: usize,
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<TrainableNTuple, String> {
-    let network = TrainableNTuple::new();
-    let mut trainer = TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed)?;
+    let mut trainer =
+        TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed, random_opening_plies)?;
     trainer.train(games, progress_interval, progress_callback)?;
     Ok(trainer.into_network())
 }
 
 fn train_network_parallel(
+    base_network: TrainableNTuple,
     games: usize,
     alpha: f32,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
     threads: usize,
+    random_opening_plies: usize,
     progress_interval: usize,
     mut progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<TrainableNTuple, String> {
@@ -664,14 +846,17 @@ fn train_network_parallel(
         let mut handles = Vec::with_capacity(worker_game_counts.len());
         for (worker_idx, worker_games) in worker_game_counts.iter().copied().enumerate() {
             let worker_tx = tx.clone();
+            let worker_network = base_network.clone();
             handles.push(
                 scope.spawn(move || -> Result<(TrainableNTuple, usize), String> {
                     let result = train_worker_network(
+                        worker_network,
                         worker_games,
                         alpha,
                         lambda_,
                         epsilon,
                         worker_seed(seed, worker_idx),
+                        random_opening_plies,
                         worker_progress_interval,
                         worker_tx.clone(),
                     );
@@ -724,16 +909,18 @@ fn train_network_parallel(
 }
 
 fn train_worker_network(
+    network: TrainableNTuple,
     games: usize,
     alpha: f32,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
+    random_opening_plies: usize,
     progress_interval: usize,
     progress_tx: mpsc::Sender<WorkerMessage>,
 ) -> Result<TrainableNTuple, String> {
-    let network = TrainableNTuple::new();
-    let mut trainer = TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed)?;
+    let mut trainer =
+        TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed, random_opening_plies)?;
 
     if progress_interval > 0 {
         let mut reported = 0usize;
@@ -894,6 +1081,16 @@ fn pow3(exp: usize) -> Result<usize, String> {
     Ok(out)
 }
 
+fn read_u32_le(data: &[u8], offset: usize) -> Result<u32, String> {
+    if offset + 4 > data.len() {
+        return Err("unexpected EOF while reading u32".to_string());
+    }
+
+    let mut bytes = [0u8; 4];
+    bytes.copy_from_slice(&data[offset..offset + 4]);
+    Ok(u32::from_le_bytes(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -930,7 +1127,7 @@ mod tests {
             value: 0.0,
             updates: Vec::new(),
         };
-        let mut trainer = TDLambdaTrainer::new(network, 0.5, 0.0, 0.0, 7).unwrap();
+        let mut trainer = TDLambdaTrainer::new(network, 0.5, 0.0, 0.0, 7, 0).unwrap();
         let history = vec![(Board::new(), true)];
         let final_board = Board::from_bitboards(u64::MAX, 0);
 
@@ -947,7 +1144,7 @@ mod tests {
                 value: 0.0,
                 updates: Vec::new(),
             };
-            let mut trainer = TDLambdaTrainer::new(network, 1.0, 0.0, 0.0, 11).unwrap();
+            let mut trainer = TDLambdaTrainer::new(network, 1.0, 0.0, 0.0, 11, 0).unwrap();
             let history = vec![(Board::new(), is_black)];
             let final_board = Board::from_bitboards(u64::MAX, 0);
 
@@ -963,7 +1160,7 @@ mod tests {
             value: 0.0,
             updates: Vec::new(),
         };
-        let mut trainer = TDLambdaTrainer::new(network, 1.0, 0.5, 0.0, 13).unwrap();
+        let mut trainer = TDLambdaTrainer::new(network, 1.0, 0.5, 0.0, 13, 0).unwrap();
         let history = vec![(Board::new(), true), (Board::new(), false)];
         let final_board = Board::from_bitboards(u64::MAX, 0);
 
@@ -1027,9 +1224,9 @@ mod tests {
     #[test]
     fn play_one_game_is_reproducible_with_fixed_seed() {
         let mut trainer_a =
-            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026).unwrap();
+            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026, 0).unwrap();
         let mut trainer_b =
-            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026).unwrap();
+            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026, 0).unwrap();
 
         trainer_a.play_one_game().unwrap();
         trainer_b.play_one_game().unwrap();
@@ -1046,8 +1243,25 @@ mod tests {
     }
 
     #[test]
+    fn play_one_game_with_random_opening_is_reproducible_with_fixed_seed() {
+        let mut trainer_a =
+            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026, 4).unwrap();
+        let mut trainer_b =
+            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.3, 2026, 4).unwrap();
+
+        trainer_a.play_one_game().unwrap();
+        trainer_b.play_one_game().unwrap();
+
+        assert_eq!(
+            trainer_a.network.raw_weights(),
+            trainer_b.network.raw_weights()
+        );
+    }
+
+    #[test]
     fn train_reports_progress_at_interval_and_completion() {
-        let mut trainer = TDLambdaTrainer::new(TrainableNTuple::new(), 0.0, 0.0, 0.0, 5).unwrap();
+        let mut trainer =
+            TDLambdaTrainer::new(TrainableNTuple::new(), 0.0, 0.0, 0.0, 5, 0).unwrap();
         let mut updates = Vec::new();
         let mut callback = |done: usize, total: usize, elapsed: f64| {
             updates.push((done, total, elapsed));
@@ -1066,7 +1280,7 @@ mod tests {
 
     #[test]
     fn train_to_bytes_writes_v3_header_with_phase_count() {
-        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, 0, None).unwrap();
+        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
         let bytes = decompress_model_bytes(&bytes).unwrap();
         assert_eq!(&bytes[0..4], MAGIC);
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), VERSION);
@@ -1078,7 +1292,7 @@ mod tests {
 
     #[test]
     fn exported_bytes_are_readable_by_inference_evaluator() {
-        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, 0, None).unwrap();
+        let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
         let evaluator = NTupleEvaluator::from_bytes(&bytes).unwrap();
         let score = evaluator.evaluate(&Board::new(), true);
         assert_eq!(score, 0.0);
@@ -1098,8 +1312,26 @@ mod tests {
 
     #[test]
     fn parallel_training_is_reproducible_for_fixed_seed_and_thread_count() {
-        let first = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, 0, None).unwrap();
-        let second = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, 0, None).unwrap();
+        let first = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, None, 0, 0, None).unwrap();
+        let second = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, None, 0, 0, None).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn train_to_bytes_supports_resuming_from_zero_checkpoint() {
+        let checkpoint = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
+        let resumed =
+            train_to_bytes(8, 0.01, 0.7, 0.1, 42, 1, Some(&checkpoint), 0, 0, None).unwrap();
+        let fresh = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
+
+        assert_eq!(resumed, fresh);
+    }
+
+    #[test]
+    fn random_opening_training_is_reproducible_with_fixed_seed() {
+        let first = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, None, 4, 0, None).unwrap();
+        let second = train_to_bytes(8, 0.01, 0.7, 0.1, 42, 2, None, 4, 0, None).unwrap();
 
         assert_eq!(first, second);
     }
@@ -1128,7 +1360,7 @@ mod tests {
     #[test]
     fn select_move_uses_shallow_search_not_single_ply_greedy() {
         let network = CountingNetwork::new();
-        let mut trainer = TDLambdaTrainer::new(network, 0.01, 0.7, 0.0, 17).unwrap();
+        let mut trainer = TDLambdaTrainer::new(network, 0.01, 0.7, 0.0, 17, 0).unwrap();
         let board = Board::new();
         let legal = board.legal_moves(true);
 

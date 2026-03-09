@@ -8,6 +8,8 @@ use pyo3::prelude::*;
     epsilon = 0.1,
     seed = 42,
     threads = 1,
+    initial_model = None,
+    random_opening_plies = 0,
     progress_interval = 0,
     progress_callback = None
 ))]
@@ -19,6 +21,8 @@ fn train_to_bytes(
     epsilon: f64,
     seed: u64,
     threads: usize,
+    initial_model: Option<Vec<u8>>,
+    random_opening_plies: usize,
     progress_interval: usize,
     progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<Vec<u8>> {
@@ -46,6 +50,8 @@ fn train_to_bytes(
                 epsilon,
                 seed,
                 threads,
+                initial_model.as_deref(),
+                random_opening_plies,
                 progress_interval,
                 Some(&mut progress),
             )
@@ -57,6 +63,8 @@ fn train_to_bytes(
                 epsilon,
                 seed,
                 threads,
+                initial_model.as_deref(),
+                random_opening_plies,
                 progress_interval,
                 None,
             )

@@ -11,3 +11,5 @@ pytest-cache-files-*/
 /tmp*/
 python/dist/
 python/rust_training_ext/target/
+models/
+checkpoints/
