@@ -8,9 +8,25 @@ const ZSTD_MAGIC: &[u8; 4] = &[0x28, 0xB5, 0x2F, 0xFD];
 const ZSTD_LEVEL: i32 = 19;
 const VERSION_V1: u32 = 1;
 const VERSION_V2: u32 = 2;
+const VERSION_V3: u32 = 3;
 const HEADER_SIZE: usize = 20;
 const BOARD_SIZE: usize = 8;
 const BOARD_CELLS: usize = BOARD_SIZE * BOARD_SIZE;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SymmetryMode {
+    Rotations4,
+    Dihedral8,
+}
+
+impl SymmetryMode {
+    fn count(self) -> u8 {
+        match self {
+            Self::Rotations4 => 4,
+            Self::Dihedral8 => 8,
+        }
+    }
+}
 
 /// Inference-time N-Tuple evaluator loaded from `weights.bin`.
 #[derive(Debug, Clone)]
@@ -18,6 +34,7 @@ pub struct NTupleEvaluator {
     tuples: Vec<Vec<u8>>,
     phase_count: usize,
     weights: Vec<Vec<Vec<f32>>>,
+    symmetry_mode: SymmetryMode,
 }
 
 pub fn compress_model_bytes(data: &[u8]) -> Result<Vec<u8>, String> {
@@ -57,18 +74,25 @@ impl NTupleEvaluator {
         let version = read_u32_le(data, 4)?;
         let num_tuples = read_u32_le(data, 8)? as usize;
         let expected_crc = read_u32_le(data, 12)?;
-        let phase_count = match version {
-            VERSION_V1 => 1,
+        let (phase_count, symmetry_mode) = match version {
+            VERSION_V1 => (1, SymmetryMode::Rotations4),
             VERSION_V2 => {
                 let count = read_u32_le(data, 16)? as usize;
                 if count == 0 {
                     return Err("phase_count must be greater than 0".to_string());
                 }
-                count
+                (count, SymmetryMode::Rotations4)
+            }
+            VERSION_V3 => {
+                let count = read_u32_le(data, 16)? as usize;
+                if count == 0 {
+                    return Err("phase_count must be greater than 0".to_string());
+                }
+                (count, SymmetryMode::Dihedral8)
             }
             _ => {
                 return Err(format!(
-                    "unsupported weights version: expected {VERSION_V1} or {VERSION_V2}, got {version}"
+                    "unsupported weights version: expected {VERSION_V1}, {VERSION_V2}, or {VERSION_V3}, got {version}"
                 ));
             }
         };
@@ -146,6 +170,7 @@ impl NTupleEvaluator {
             tuples,
             phase_count,
             weights,
+            symmetry_mode,
         })
     }
 
@@ -156,11 +181,11 @@ impl NTupleEvaluator {
         let phase_weights = &self.weights[phase_idx];
         let mut score = 0.0f32;
 
-        for rotation in 0..4u8 {
+        for symmetry in 0..self.symmetry_mode.count() {
             for (tuple, weights) in self.tuples.iter().zip(phase_weights.iter()) {
                 let idx = tuple.iter().fold(0usize, |acc, &pos| {
-                    let rotated = rotate_pos(pos, rotation);
-                    let value = map_to_player_view(cells[rotated], is_black) as usize;
+                    let transformed = transform_pos(pos, symmetry);
+                    let value = map_to_player_view(cells[transformed], is_black) as usize;
                     acc * 3 + value
                 });
                 score += weights[idx];
@@ -176,15 +201,19 @@ fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
     (plies / 2).min(phase_count.saturating_sub(1))
 }
 
-fn rotate_pos(pos: u8, rotation: u8) -> usize {
+fn transform_pos(pos: u8, symmetry: u8) -> usize {
     let row = (pos as usize) / BOARD_SIZE;
     let col = (pos as usize) % BOARD_SIZE;
 
-    let (nr, nc) = match rotation % 4 {
+    let (nr, nc) = match symmetry {
         0 => (row, col),
         1 => (col, BOARD_SIZE - 1 - row),
         2 => (BOARD_SIZE - 1 - row, BOARD_SIZE - 1 - col),
-        _ => (BOARD_SIZE - 1 - col, row),
+        3 => (BOARD_SIZE - 1 - col, row),
+        4 => (row, BOARD_SIZE - 1 - col),
+        5 => (BOARD_SIZE - 1 - col, BOARD_SIZE - 1 - row),
+        6 => (BOARD_SIZE - 1 - row, col),
+        _ => (col, row),
     };
 
     nr * BOARD_SIZE + nc
@@ -233,6 +262,14 @@ mod tests {
         phase_count: u32,
     ) -> Vec<u8> {
         build_weights_blob(VERSION_V2, tuples, phase_weights, phase_count)
+    }
+
+    fn build_weights_blob_v3(
+        tuples: &[Vec<u8>],
+        phase_weights: &[Vec<Vec<f32>>],
+        phase_count: u32,
+    ) -> Vec<u8> {
+        build_weights_blob(VERSION_V3, tuples, phase_weights, phase_count)
     }
 
     fn build_weights_blob(
@@ -320,6 +357,24 @@ mod tests {
         assert_eq!(evaluator.tuples, tuples);
         assert_eq!(evaluator.phase_count, 2);
         assert_eq!(evaluator.weights, phase_weights);
+        assert_eq!(evaluator.symmetry_mode, SymmetryMode::Rotations4);
+    }
+
+    #[test]
+    fn from_bytes_deserializes_v3_tuple_defs_and_weights() {
+        let tuples = vec![vec![0, 1]];
+        let phase_weights = vec![
+            vec![vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]],
+            vec![vec![10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0]],
+        ];
+        let bytes = build_weights_blob_v3(&tuples, &phase_weights, 2);
+
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+
+        assert_eq!(evaluator.tuples, tuples);
+        assert_eq!(evaluator.phase_count, 2);
+        assert_eq!(evaluator.weights, phase_weights);
+        assert_eq!(evaluator.symmetry_mode, SymmetryMode::Dihedral8);
     }
 
     #[test]
@@ -333,6 +388,7 @@ mod tests {
         assert_eq!(evaluator.tuples, tuples);
         assert_eq!(evaluator.phase_count, 1);
         assert_eq!(evaluator.weights, vec![weights]);
+        assert_eq!(evaluator.symmetry_mode, SymmetryMode::Rotations4);
     }
 
     #[test]
@@ -422,6 +478,41 @@ mod tests {
 
         assert_eq!(black_score, 4.0);
         assert_eq!(white_score, -4.0);
+    }
+
+    #[test]
+    fn evaluate_v3_applies_dihedral_symmetry_and_player_view() {
+        let tuples = vec![vec![0]];
+        let phase_weights = vec![vec![vec![0.0, 1.0, -1.0]]];
+        let bytes = build_weights_blob_v3(&tuples, &phase_weights, 1);
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+
+        let black = bit(0) | bit(7) | bit(56) | bit(63);
+        let board = Board::from_bitboards(black, 0);
+
+        let black_score = evaluator.evaluate(&board, true);
+        let white_score = evaluator.evaluate(&board, false);
+
+        assert_eq!(black_score, 8.0);
+        assert_eq!(white_score, -8.0);
+    }
+
+    #[test]
+    fn evaluate_v3_is_reflection_invariant_for_opening_positions() {
+        let tuples = vec![vec![0, 1]];
+        let phase_weights = vec![vec![vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]]];
+        let bytes = build_weights_blob_v3(&tuples, &phase_weights, 1);
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+
+        let mut d3_board = Board::new();
+        let mut c4_board = Board::new();
+        assert_ne!(d3_board.place(19, true), 0);
+        assert_ne!(c4_board.place(26, true), 0);
+
+        assert_eq!(
+            evaluator.evaluate(&d3_board, false),
+            evaluator.evaluate(&c4_board, false)
+        );
     }
 
     #[test]

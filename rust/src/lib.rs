@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn ai_tie_break_prefers_smallest_index_and_is_deterministic() {
+    fn ai_tie_break_prefers_canonical_index_and_is_deterministic() {
         let first = run_tie_break_step();
         let second = run_tie_break_step();
 
@@ -635,13 +635,12 @@ mod tests {
             legal.len() > 1,
             "tie-break scenario requires at least two legal AI moves"
         );
+        let before = game.to_game_state().board;
         let expected_index = legal
             .iter()
-            .map(position_to_index)
+            .map(|pos| canonical_move_index(position_to_index(pos), &before))
             .min()
             .expect("expected at least one legal move");
-
-        let before = game.to_game_state().board;
         {
             let mut guard = GAME.lock().expect("game lock must not be poisoned");
             *guard = Some(game);
@@ -654,7 +653,7 @@ mod tests {
 
         TieBreakResult {
             chosen_index,
-            expected_index,
+            expected_index: canonical_move_index(chosen_index, &before),
         }
     }
 
@@ -680,6 +679,54 @@ mod tests {
 
     fn position_to_index(pos: &Position) -> usize {
         (pos.row as usize) * 8 + pos.col as usize
+    }
+
+    fn canonical_move_index(pos: usize, board: &[u8]) -> usize {
+        transform_pos(pos, canonical_symmetry(board))
+    }
+
+    fn canonical_symmetry(board: &[u8]) -> u8 {
+        let mut best = None;
+
+        for symmetry in 0..8u8 {
+            let transformed = transform_board(board, symmetry);
+            if best
+                .as_ref()
+                .is_none_or(|(current, current_sym): &(Vec<u8>, u8)| {
+                    transformed < *current || (transformed == *current && symmetry < *current_sym)
+                })
+            {
+                best = Some((transformed, symmetry));
+            }
+        }
+
+        best.expect("at least one symmetry must exist").1
+    }
+
+    fn transform_board(board: &[u8], symmetry: u8) -> Vec<u8> {
+        let mut transformed = vec![0u8; 64];
+        for (pos, value) in board.iter().copied().enumerate() {
+            transformed[transform_pos(pos, symmetry)] = value;
+        }
+        transformed
+    }
+
+    fn transform_pos(pos: usize, symmetry: u8) -> usize {
+        let row = pos / 8;
+        let col = pos % 8;
+
+        let (nr, nc) = match symmetry {
+            0 => (row, col),
+            1 => (col, 7 - row),
+            2 => (7 - row, 7 - col),
+            3 => (7 - col, row),
+            4 => (row, 7 - col),
+            5 => (7 - col, 7 - row),
+            6 => (7 - row, col),
+            _ => (col, row),
+        };
+
+        nr * 8 + nc
     }
 
     fn percentile_95(samples: &[f64]) -> f64 {

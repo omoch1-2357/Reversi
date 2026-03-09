@@ -54,14 +54,14 @@ def test_pattern_index_is_base3_encoding() -> None:
     assert index == 65
 
 
-def test_symmetries_returns_four_unique_rotations_for_asymmetric_array() -> None:
+def test_symmetries_returns_eight_unique_transforms_for_asymmetric_array() -> None:
     arr = np.arange(64, dtype=np.uint8)
     symmetries = NTupleNetwork._symmetries(arr)
 
-    assert len(symmetries) == 4
+    assert len(symmetries) == 8
     assert np.array_equal(symmetries[0], arr)
     assert all(sym.shape == (64,) for sym in symmetries)
-    assert len({tuple(sym.tolist()) for sym in symmetries}) == 4
+    assert len({tuple(sym.tolist()) for sym in symmetries}) == 8
 
 
 def test_symmetries_second_entry_matches_clockwise_90_rotation() -> None:
@@ -77,6 +77,21 @@ def test_symmetries_second_entry_matches_clockwise_90_rotation() -> None:
             expected[dst] = arr[src]
 
     assert np.array_equal(rotated, expected)
+
+
+def test_symmetries_fifth_entry_matches_vertical_reflection() -> None:
+    arr = np.arange(NUM_SQUARES, dtype=np.uint8)
+    symmetries = NTupleNetwork._symmetries(arr)
+    reflected = symmetries[4]
+
+    expected = np.empty(NUM_SQUARES, dtype=np.uint8)
+    for row in range(8):
+        for col in range(8):
+            src = row * 8 + col
+            dst = row * 8 + (7 - col)
+            expected[dst] = arr[src]
+
+    assert np.array_equal(reflected, expected)
 
 
 def test_symmetries_raises_value_error_for_invalid_size() -> None:
@@ -99,8 +114,8 @@ def test_evaluate_uses_current_phase_weights() -> None:
         idx = ntuple._pattern_index(sym, pattern)
         ntuple.weights[1][0][idx] = np.float32(2.0)
 
-    assert ntuple.evaluate(phase0_board, True) == pytest.approx(4.0)
-    assert ntuple.evaluate(phase1_board, True) == pytest.approx(8.0)
+    assert ntuple.evaluate(phase0_board, True) == pytest.approx(8.0)
+    assert ntuple.evaluate(phase1_board, True) == pytest.approx(16.0)
 
 
 def test_update_applies_delta_only_to_active_phase() -> None:
@@ -148,3 +163,19 @@ def test_evaluate_uses_current_player_perspective() -> None:
     with patch.object(NTupleNetwork, "_symmetries", one_symmetry):
         assert ntuple.evaluate(board, True) == pytest.approx(2.5)
         assert ntuple.evaluate(board, False) == pytest.approx(-1.5)
+
+
+def test_evaluate_is_reflection_invariant_for_opening_positions() -> None:
+    ntuple = NTupleNetwork()
+    ntuple.weights[0][0] = np.arange(
+        len(ntuple.weights[0][0]), dtype=np.float32
+    ) / np.float32(1000.0)
+
+    d3_board = Board()
+    c4_board = Board()
+    assert d3_board.place(19, True) != 0
+    assert c4_board.place(26, True) != 0
+
+    assert ntuple.evaluate(d3_board, False) == pytest.approx(
+        ntuple.evaluate(c4_board, False)
+    )

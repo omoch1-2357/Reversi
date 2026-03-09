@@ -83,7 +83,7 @@ class NTupleNetwork:
 
     @staticmethod
     def _symmetries(board_array: np.ndarray) -> list[np.ndarray]:
-        """Return clockwise rotational symmetries (0/90/180/270 degrees)."""
+        """Return the 8 dihedral symmetries of the board array."""
         if board_array.size != NUM_SQUARES:
             raise ValueError(
                 f"board_array size must be {NUM_SQUARES}, got {board_array.size}"
@@ -93,4 +93,7 @@ class NTupleNetwork:
         transformed: list[np.ndarray] = []
         for turns in range(4):
             transformed.append(np.rot90(board_grid, -turns).flatten())
+        reflected = np.fliplr(board_grid)
+        for turns in range(4):
+            transformed.append(np.rot90(reflected, -turns).flatten())
         return transformed

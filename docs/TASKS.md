@@ -56,7 +56,7 @@
 ### 2-3. `ntuple.py` — N-Tuple Network
 
 - [x] タプルパターン定義（`TUPLE_PATTERNS`）
-- [x] 回転4対称変換 `_symmetries()`（反転相当はタプル定義で吸収）
+- [x] D4対称変換 `_symmetries()`
 - [x] 評価 `evaluate(board, is_black)` — 手番視点スコア
 - [x] 更新 `update(board, is_black, delta)` — 学習率適用済み更新量
 - [x] パターンインデックス計算 `_pattern_index()`
@@ -90,7 +90,7 @@
 - [x] 仮 `weights.bin` を Python で生成し `rust/src/ai/` に配置
 - [x] `NTupleEvaluator` 構造体
 - [x] `from_bytes()` — デシリアライズ（マジック・バージョン・CRC32 検証）
-- [x] `evaluate(board, is_black)` — 手番視点、回転4対称変換（反転相当はタプル定義で吸収）
+- [x] `evaluate(board, is_black)` — 手番視点、D4対称変換
 - [x] 単体テスト: デシリアライズ成功/失敗、評価値計算、T-09（不正 weights.bin）
 
 ### 3-2. `ai/search.rs` — 探索アルゴリズム

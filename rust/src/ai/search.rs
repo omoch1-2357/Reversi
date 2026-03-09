@@ -196,7 +196,7 @@ impl<'a> Searcher<'a> {
                 SearchResult::TimedOut => return SearchResult::TimedOut,
                 SearchResult::Complete(_, score) => {
                     let score = -score;
-                    if is_better_move(score, mv, best_score, best_move) {
+                    if is_better_move(board, score, mv, best_score, best_move) {
                         best_score = score;
                         best_move = mv;
                     }
@@ -314,7 +314,7 @@ impl<'a> Searcher<'a> {
                 SearchResult::TimedOut => return SearchResult::TimedOut,
                 SearchResult::Complete(_, score) => {
                     let score = -score;
-                    if is_better_move(score, mv, best_score, best_move) {
+                    if is_better_move(board, score, mv, best_score, best_move) {
                         best_score = score;
                         best_move = mv;
                     }
@@ -350,8 +350,12 @@ pub(crate) fn set_force_exact_solve_timeout_for_test(force: bool) {
     FORCE_EXACT_SOLVE_TIMEOUT.store(force, Ordering::Relaxed);
 }
 
-fn is_better_move(score: f32, mv: usize, best_score: f32, best_move: usize) -> bool {
-    score > best_score || (score == best_score && mv < best_move)
+fn is_better_move(board: &Board, score: f32, mv: usize, best_score: f32, best_move: usize) -> bool {
+    let tie_break_symmetry = canonical_symmetry(board);
+    let move_key = transform_pos(mv as u8, tie_break_symmetry);
+    let best_key = transform_pos(best_move as u8, tie_break_symmetry);
+
+    score > best_score || (score == best_score && move_key < best_key)
 }
 
 fn exact_score(board: &Board, is_black: bool) -> f32 {
@@ -400,6 +404,7 @@ fn bitboard_to_sorted_moves(
     evaluator: &NTupleEvaluator,
     preferred_move: Option<usize>,
 ) -> Vec<usize> {
+    let tie_break_symmetry = canonical_symmetry(board);
     let mut scored_moves: Vec<(usize, f32)> = bitboard_to_positions(legal)
         .into_iter()
         .map(|mv| {
@@ -418,10 +423,59 @@ fn bitboard_to_sorted_moves(
         right_preferred
             .cmp(&left_preferred)
             .then_with(|| right_score.total_cmp(left_score))
-            .then_with(|| left_mv.cmp(right_mv))
+            .then_with(|| {
+                transform_pos(*left_mv as u8, tie_break_symmetry)
+                    .cmp(&transform_pos(*right_mv as u8, tie_break_symmetry))
+            })
     });
 
     scored_moves.into_iter().map(|(mv, _)| mv).collect()
+}
+
+fn canonical_symmetry(board: &Board) -> u8 {
+    let (black, white) = board.bitboards();
+    let mut best = None;
+
+    for symmetry in 0..8u8 {
+        let transformed = (
+            transform_bitboard(black, symmetry),
+            transform_bitboard(white, symmetry),
+            symmetry,
+        );
+        if best.is_none_or(|current| transformed < current) {
+            best = Some(transformed);
+        }
+    }
+
+    best.expect("at least one symmetry must exist").2
+}
+
+fn transform_bitboard(mut bits: u64, symmetry: u8) -> u64 {
+    let mut out = 0u64;
+    while bits != 0 {
+        let pos = bits.trailing_zeros() as u8;
+        out |= 1u64 << transform_pos(pos, symmetry);
+        bits &= bits - 1;
+    }
+    out
+}
+
+fn transform_pos(pos: u8, symmetry: u8) -> usize {
+    let row = (pos as usize) / 8;
+    let col = (pos as usize) % 8;
+
+    let (nr, nc) = match symmetry {
+        0 => (row, col),
+        1 => (col, 7 - row),
+        2 => (7 - row, 7 - col),
+        3 => (7 - col, row),
+        4 => (row, 7 - col),
+        5 => (7 - col, 7 - row),
+        6 => (7 - row, col),
+        _ => (col, row),
+    };
+
+    nr * 8 + nc
 }
 
 #[cfg(test)]
@@ -501,6 +555,22 @@ mod tests {
 
         // Initial legal moves are [19, 26, 37, 44].
         assert_eq!(searcher.search(&board, true), 19);
+    }
+
+    #[test]
+    fn search_tie_break_is_reflection_invariant_for_equal_scores() {
+        let evaluator = build_constant_evaluator();
+
+        let mut d3_board = Board::new();
+        let mut c4_board = Board::new();
+        assert_ne!(d3_board.place(19, true), 0);
+        assert_ne!(c4_board.place(26, true), 0);
+
+        let d3_choice = Searcher::new(&evaluator, 1).search(&d3_board, false);
+        let c4_choice = Searcher::new(&evaluator, 1).search(&c4_board, false);
+
+        assert_eq!(d3_choice, 18);
+        assert_eq!(c4_choice, 18);
     }
 
     #[test]

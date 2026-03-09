@@ -10,7 +10,7 @@ from ntuple import NTupleNetwork
 from rust_training import compress_model_bytes
 
 MAGIC = b"NTRV"
-VERSION = 2
+VERSION = 3
 HEADER_SIZE = 20
 
 

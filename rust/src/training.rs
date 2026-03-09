@@ -29,8 +29,8 @@ pub const TUPLE_PATTERNS: &[&[u8]] = &[
 ];
 
 const MAGIC: &[u8; 4] = b"NTRV";
-const VERSION: u32 = 2;
-const ROTATION_COUNT: usize = 4;
+const VERSION: u32 = 3;
+const SYMMETRY_COUNT: usize = 8;
 const TUPLE_COUNT: usize = 14;
 const MAX_TUPLE_LEN: usize = 10;
 const TRAINING_SEARCH_DEPTH: u8 = 2;
@@ -39,23 +39,24 @@ pub const PHASE_COUNT: usize = 30;
 #[derive(Debug, Clone, Copy)]
 struct CompiledTuple {
     len: usize,
-    rotated_positions: [[u8; MAX_TUPLE_LEN]; ROTATION_COUNT],
+    transformed_positions: [[u8; MAX_TUPLE_LEN]; SYMMETRY_COUNT],
 }
 
 static COMPILED_TUPLES: LazyLock<[CompiledTuple; TUPLE_COUNT]> = LazyLock::new(|| {
     std::array::from_fn(|tuple_idx| {
         let pattern = TUPLE_PATTERNS[tuple_idx];
-        let mut rotated_positions = [[0u8; MAX_TUPLE_LEN]; ROTATION_COUNT];
+        let mut transformed_positions = [[0u8; MAX_TUPLE_LEN]; SYMMETRY_COUNT];
 
-        for rotation in 0..ROTATION_COUNT {
+        for symmetry in 0..SYMMETRY_COUNT {
             for (cell_idx, &pos) in pattern.iter().enumerate() {
-                rotated_positions[rotation][cell_idx] = rotate_pos(pos, rotation as u8) as u8;
+                transformed_positions[symmetry][cell_idx] =
+                    transform_pos(pos, symmetry as u8) as u8;
             }
         }
 
         CompiledTuple {
             len: pattern.len(),
-            rotated_positions,
+            transformed_positions,
         }
     })
 });
@@ -202,20 +203,24 @@ impl TrainableNTuple {
     fn compute_feature_indices(
         board: &Board,
         is_black: bool,
-    ) -> [[usize; TUPLE_COUNT]; ROTATION_COUNT] {
+    ) -> [[usize; TUPLE_COUNT]; SYMMETRY_COUNT] {
         let (black, white) = board.bitboards();
         let (me, opp) = if is_black {
             (black, white)
         } else {
             (white, black)
         };
-        let mut indices = [[0usize; TUPLE_COUNT]; ROTATION_COUNT];
+        let mut indices = [[0usize; TUPLE_COUNT]; SYMMETRY_COUNT];
 
-        for rotation in 0..ROTATION_COUNT {
+        for symmetry in 0..SYMMETRY_COUNT {
             for tuple_idx in 0..TUPLE_COUNT {
                 let compiled = &COMPILED_TUPLES[tuple_idx];
-                indices[rotation][tuple_idx] =
-                    tuple_index(&compiled.rotated_positions[rotation], compiled.len, me, opp);
+                indices[symmetry][tuple_idx] = tuple_index(
+                    &compiled.transformed_positions[symmetry],
+                    compiled.len,
+                    me,
+                    opp,
+                );
             }
         }
 
@@ -225,7 +230,7 @@ impl TrainableNTuple {
     fn sum_feature_indices(
         &self,
         phase_idx: usize,
-        indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT],
+        indices: &[[usize; TUPLE_COUNT]; SYMMETRY_COUNT],
     ) -> f32 {
         let mut score = 0.0f32;
         let phase_weights = &self.weights[phase_idx];
@@ -242,7 +247,7 @@ impl TrainableNTuple {
     fn apply_delta(
         &mut self,
         phase_idx: usize,
-        indices: &[[usize; TUPLE_COUNT]; ROTATION_COUNT],
+        indices: &[[usize; TUPLE_COUNT]; SYMMETRY_COUNT],
         delta: f32,
     ) {
         let phase_weights = &mut self.weights[phase_idx];
@@ -839,16 +844,20 @@ fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
     (plies / 2).min(phase_count.saturating_sub(1))
 }
 
-fn rotate_pos(pos: u8, rotation: u8) -> usize {
+fn transform_pos(pos: u8, symmetry: u8) -> usize {
     const BOARD_SIZE: usize = 8;
     let row = (pos as usize) / BOARD_SIZE;
     let col = (pos as usize) % BOARD_SIZE;
 
-    let (nr, nc) = match rotation % 4 {
+    let (nr, nc) = match symmetry {
         0 => (row, col),
         1 => (col, BOARD_SIZE - 1 - row),
         2 => (BOARD_SIZE - 1 - row, BOARD_SIZE - 1 - col),
-        _ => (BOARD_SIZE - 1 - col, row),
+        3 => (BOARD_SIZE - 1 - col, row),
+        4 => (row, BOARD_SIZE - 1 - col),
+        5 => (BOARD_SIZE - 1 - col, BOARD_SIZE - 1 - row),
+        6 => (BOARD_SIZE - 1 - row, col),
+        _ => (col, row),
     };
 
     nr * BOARD_SIZE + nc
@@ -994,13 +1003,13 @@ mod tests {
         let phase0_indices = TrainableNTuple::compute_feature_indices(&phase0_board, true);
         let phase1_indices = TrainableNTuple::compute_feature_indices(&phase1_board, true);
 
-        for rotation in 0..ROTATION_COUNT {
-            network.weights[0][0][phase0_indices[rotation][0]] = 1.0;
-            network.weights[1][0][phase1_indices[rotation][0]] = 2.0;
+        for symmetry in 0..SYMMETRY_COUNT {
+            network.weights[0][0][phase0_indices[symmetry][0]] = 1.0;
+            network.weights[1][0][phase1_indices[symmetry][0]] = 2.0;
         }
 
-        assert_eq!(network.evaluate(&phase0_board, true), 4.0);
-        assert_eq!(network.evaluate(&phase1_board, true), 8.0);
+        assert_eq!(network.evaluate(&phase0_board, true), 8.0);
+        assert_eq!(network.evaluate(&phase1_board, true), 16.0);
     }
 
     #[test]
@@ -1056,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn train_to_bytes_writes_v2_header_with_phase_count() {
+    fn train_to_bytes_writes_v3_header_with_phase_count() {
         let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, 0, None).unwrap();
         let bytes = decompress_model_bytes(&bytes).unwrap();
         assert_eq!(&bytes[0..4], MAGIC);
