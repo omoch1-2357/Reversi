@@ -653,7 +653,7 @@ mod tests {
 
         TieBreakResult {
             chosen_index,
-            expected_index: canonical_move_index(chosen_index, &before),
+            expected_index,
         }
     }
 

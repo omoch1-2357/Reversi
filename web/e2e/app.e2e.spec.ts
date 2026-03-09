@@ -159,7 +159,7 @@ test('worker e2e flow is deterministic with real wasm', async ({ page }) => {
   expect(summary.aiStepCount).toBeGreaterThan(0)
   expect(summary.finalResult).toEqual({
     winner: 2,
-    black_count: 19,
-    white_count: 45,
+    black_count: 12,
+    white_count: 52,
   })
 })

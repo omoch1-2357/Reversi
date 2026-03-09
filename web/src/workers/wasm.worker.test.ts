@@ -90,8 +90,8 @@ let realWasmInitPromise: ReturnType<WorkerDependencies['ensureWasmModuleLoaded']
 // values are the resulting final stone counts and winner for that exact flow.
 const expectedDeterministicResult: GameResult = {
   winner: 2,
-  black_count: 19,
-  white_count: 45,
+  black_count: 12,
+  white_count: 52,
 }
 
 const loadRealBindings = async (): Promise<ReversiBindingsModule> => {

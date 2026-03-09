@@ -14,9 +14,7 @@ once_cell = "1.21"
 crc32fast = "1.4"
 web-time = "1.1"
 zstd = { version = "0.13", default-features = false, features = ["wasm"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rand = "0.8"
+rand = { version = "0.8", default-features = false, features = ["alloc"] }
 rand_chacha = "0.3"
 
 [dev-dependencies]
