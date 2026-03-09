@@ -1,72 +1,26 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is currently documentation-first. Use these files as the source of truth:
-- `docs/REQUIREMENTS.md`: product and technical requirements
-- `docs/DESIGN.md`: architecture and module design
-- `docs/TASKS.md`: implementation phases and master checklist; execute and track work as GitHub Issues
-
-Planned implementation layout:
-- `rust/`: game engine and WASM API (`src/lib.rs`, `src/ai/search.rs`)
-- `python/`: training pipeline (`train.py`, `td_lambda.py`, `export_model.py`)
-- `web/`: React + TypeScript UI (`src/components`, `src/workers`, `src/wasm`)
-- `.github/workflows/`: CI/CD and deployment jobs
+`rust/` contains the core engine and WASM-facing API, with AI code under `rust/src/ai/` and integration tests in `rust/tests/`. `python/` holds training and model-export utilities, plus tests in `python/tests/`. `web/` is the React + TypeScript frontend; UI components live in `web/src/components/`, hooks in `web/src/hooks/`, workers in `web/src/workers/`, and browser tests in `web/e2e/`. Treat `docs/REQUIREMENTS.md`, `docs/DESIGN.md`, and `docs/TASKS.md` as the product and architecture source of truth.
 
 ## Build, Test, and Development Commands
-Run commands from repository root (once each module exists):
-- `cargo test --manifest-path rust/Cargo.toml` - run Rust unit/integration tests.
-- `wasm-pack build rust --target web` - compile Rust engine to WebAssembly.
-- `pytest python/tests -q` - run Python training/format tests.
-- `npm --prefix web ci` - install frontend dependencies.
-- `npm --prefix web run dev` - start local frontend dev server.
-- `npm --prefix web run build` - create production frontend build.
-- `npx --prefix web playwright test` - run browser integration/E2E checks.
-- `gh issue create --title "..."` - create and track Issues from `docs/TASKS.md`.
-- `gh pr create --fill --body "Closes #<issue>"` - open PRs linked to Issues.
+- `cargo test --manifest-path rust/Cargo.toml`: run Rust unit and integration tests.
+- `wasm-pack build rust --target web`: compile the Rust engine to WebAssembly.
+- `pytest python/tests -q`: run Python training and export tests.
+- `npm --prefix web run dev`: start the Vite frontend locally.
+- `npm --prefix web run build`: build WASM, type-check, and create the production bundle.
+- `npm --prefix web run test`: run Vitest component and hook tests.
+- `npm --prefix web run test:e2e`: run Playwright app flows.
+- `npm --prefix web run lint`: run ESLint for the frontend.
 
 ## Coding Style & Naming Conventions
-- Rust: follow `rustfmt` defaults; `snake_case` for functions/modules, `PascalCase` for types.
-- TypeScript/React: 2-space indentation, `PascalCase` components (`Board.tsx`), `camelCase` hooks/functions (`useGame.ts`).
-- Python: PEP 8, `snake_case`, and type hints for public interfaces.
-- Keep filenames aligned with responsibilities in `docs/DESIGN.md` (for example, search logic in `search.rs`).
+Use `cargo fmt` defaults for Rust, `ruff format` for Python, and 2-space indentation in TypeScript/React. Prefer `snake_case` for Rust and Python functions/modules, `PascalCase` for Rust types and React components, and `camelCase` for TS functions and hooks such as `useGame`. Keep files aligned with responsibility boundaries in `docs/DESIGN.md`.
 
 ## Testing Guidelines
-- Rust tests: `rust/src/*` unit tests plus `rust/tests/` integration tests.
-- Python tests: `python/tests/test_*.py`.
-- Web tests: component/integration tests under `web/` plus Playwright E2E.
-- Prioritize deterministic AI behavior checks (same state + level -> same move), full API flow checks (`init_game -> place_stone -> ai_move -> get_result`), and performance targets documented in `docs/REQUIREMENTS.md`.
+Name Python tests `test_*.py`, keep Rust integration tests in `rust/tests/`, and colocate web unit tests as `*.test.ts(x)`. Cover deterministic AI behavior, API flow (`init_game -> place_stone -> ai_move -> get_result`), and browser compatibility where applicable. Before opening a PR, run the relevant module tests plus any impacted lint/format checks.
 
 ## Commit & Pull Request Guidelines
-Use GitHub Flow as the Git/branch strategy:
-- branch from `main` with short-lived branches
-- open a PR back to `main` for review and CI before merge
-- link related Issues in PRs with `Closes #<issue>`
+Recent history uses Conventional Commits, for example `feat(ai): add v3 symmetric model and benchmark tooling` and `fix(wasm): align test tie-break symmetry helper`. Keep branches short-lived off `main`, preferably linked to an issue number. PRs should include scope, linked issue or task, commands run with results, and screenshots or GIFs for visible UI changes.
 
-Agent execution rule (mandatory):
-- Do not run write-affecting `git`/`gh` commands without explicit user instruction in the current turn, except for the allowed commands listed below.
-- Explicit instruction is required for: `git add|commit|push|merge|rebase|reset|tag` and `gh pr create|edit|merge`.
-- When passing Git messages via command-line flags, do not use literal `\n`; use an actual multi-line string so line breaks are preserved as real newlines.
-- If a command fails, consider that it may require network access and may have failed due to sandbox restrictions; retry with permission escalation when needed.
-- Read-only commands are allowed without extra confirmation: `git status`, `git diff`, `git log`, `git show`, `git branch -vv`, `gh pr list/view`.
-- In addition to read-only commands, the following are allowed without extra confirmation: `git branch`, `git switch`, `git checkout`, `git cherry-pick`, and `gh issue` commands.
-- `git checkout` and `git cherry-pick` remain disallowed without explicit user instruction when the purpose is file rollback/discarding local changes.
-- A phase/subtask request alone (for example, `$phase-task-git-flow 1.2`) is treated as implementation/validation scope. Run write-affecting Git/GitHub operations only when the user also explicitly requests them, except for the allowed commands above.
-- When write-affecting Git/GitHub steps that still require explicit instruction are pending, show the exact planned commands and wait for user approval.
-
-Issue-based workflow:
-1. Create Issues from `docs/TASKS.md` and assign them to that Milestone.
-2. Start a branch from `main` using the Issue number (for example, `chore/#1-project-setup`).
-3. Open a PR with `Closes #<issue>` and merge after CI passes.
-4. Move to the next Issue.
-
-There is no established commit history yet. Use Conventional Commits:
-- `feat(rust): add legal move bitboard generation`
-- `fix(web): handle ai_move worker timeout`
-- `docs: update level-depth table`
-
-PRs should include:
-- concise summary and scope
-- linked task(s) from `docs/TASKS.md`
-- test evidence (commands run and key results)
-- screenshots/GIFs for UI-impacting changes
-- doc updates when behavior, APIs, or file layout changes
+## Contributor Workflow Notes
+Use `.pre-commit-config.yaml` as the baseline quality gate: Rust is checked with `cargo fmt`, Python with `ruff format` and `ruff check`, and web code with ESLint. Avoid committing generated WASM build output unless the change explicitly requires it.
