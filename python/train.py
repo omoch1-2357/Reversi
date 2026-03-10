@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 import struct
 import sys
@@ -161,7 +162,11 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
                 )
 
             for weight_offset in range(offset, end, 4):
-                _ = struct.unpack_from("<f", data, weight_offset)
+                (value,) = struct.unpack_from("<f", data, weight_offset)
+                if not math.isfinite(value):
+                    raise ValueError(
+                        f"non-finite weight at phase {phase_idx}, tuple index {tuple_idx}"
+                    )
             offset = end
 
     if offset != len(data):
