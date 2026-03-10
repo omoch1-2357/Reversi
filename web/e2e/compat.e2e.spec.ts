@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test'
 import {
   LEGAL_MOVE_ARIA_SUFFIX,
-  PLAYER_TURN_TEXT,
+  getPlayerTurnText,
   RESULT_DIALOG_NAME,
 } from '../src/constants/accessibility'
+import { PLAYER_BLACK } from '../src/types/player'
 import { startLevel } from './helpers'
 
 test('supported-browser flow reaches the final result dialog', async ({ page }) => {
@@ -58,7 +59,7 @@ test('supported-browser flow reaches the final result dialog', async ({ page }) 
     },
     {
       legalMoveAriaSuffix: LEGAL_MOVE_ARIA_SUFFIX,
-      playerTurnText: PLAYER_TURN_TEXT,
+      playerTurnText: getPlayerTurnText(PLAYER_BLACK),
       resultDialogName: RESULT_DIALOG_NAME,
     },
   )

@@ -1,20 +1,22 @@
 import { expect, type Page } from '@playwright/test'
 import {
   LEGAL_MOVE_ARIA_SUFFIX,
-  PLAYER_TURN_TEXT,
+  getPlayerTurnText,
   RESULT_DIALOG_NAME,
 } from '../src/constants/accessibility'
+import { PLAYER_BLACK } from '../src/types/player'
 
 const APP_PATH = '/Reversi/'
 const LEGAL_MOVE_NAME = new RegExp(`Cell \\d-\\d ${LEGAL_MOVE_ARIA_SUFFIX}`)
+const BLACK_PLAYER_TURN_TEXT = getPlayerTurnText(PLAYER_BLACK)
 
 export const startLevel = async (page: Page, level: number): Promise<void> => {
   await page.goto(APP_PATH)
-  await expect(page.getByRole('heading', { name: 'Select difficulty' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Start game' })).toBeVisible()
   await page.getByRole('button', { name: `Level ${level}` }).click()
-  await page.getByRole('button', { name: `Start level ${level}` }).click()
+  await page.getByRole('button', { name: `Start level ${level} as Black` }).click()
   await expect(page.getByRole('grid', { name: 'Reversi board' })).toBeVisible()
-  await expect(page.getByText(PLAYER_TURN_TEXT)).toBeVisible()
+  await expect(page.getByText(BLACK_PLAYER_TURN_TEXT)).toBeVisible()
 }
 
 export const advanceOnePlayerTurn = async (
@@ -28,7 +30,7 @@ export const advanceOnePlayerTurn = async (
     return 'game_over'
   }
 
-  await expect(page.getByText(PLAYER_TURN_TEXT)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(BLACK_PLAYER_TURN_TEXT)).toBeVisible({ timeout: 30_000 })
   return 'player_turn'
 }
 

@@ -3,17 +3,17 @@ import { expect, test } from '@playwright/test'
 test('app flow: level select -> board -> back to level select', async ({ page }) => {
   await page.goto('/Reversi/')
 
-  await expect(page.getByRole('heading', { name: 'Select difficulty' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Start game' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Level 4' }).click()
-  await page.getByRole('button', { name: 'Start level 4' }).click()
+  await page.getByRole('button', { name: 'Start level 4 as Black' }).click()
 
   await expect(page.getByRole('grid', { name: 'Reversi board' })).toBeVisible()
   await expect(page.getByText('Your turn (Black)')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Restart level 4' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restart level 4 as Black' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Back to level select' }).click()
-  await expect(page.getByRole('heading', { name: 'Select difficulty' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Start game' })).toBeVisible()
 })
 
 test('worker e2e flow is deterministic with real wasm', async ({ page }) => {
@@ -34,7 +34,7 @@ test('worker e2e flow is deterministic with real wasm', async ({ page }) => {
       white_count: number
     }
     type WorkerRequest =
-      | { type: 'init_game'; payload: { level: number } }
+      | { type: 'init_game'; payload: { level: number; player: number } }
       | { type: 'place_stone'; payload: { row: number; col: number } }
       | { type: 'get_result' }
     type WorkerResponse =
@@ -100,7 +100,10 @@ test('worker e2e flow is deterministic with real wasm', async ({ page }) => {
       })
 
     try {
-      const initCycle = await sendAndCollect({ type: 'init_game', payload: { level: 1 } })
+      const initCycle = await sendAndCollect({
+        type: 'init_game',
+        payload: { level: 1, player: 1 },
+      })
       let terminal = initCycle[initCycle.length - 1]
       if (!terminal || terminal.type !== 'game_state') {
         throw new Error('init_game did not return game_state')
