@@ -12,6 +12,8 @@ const VERSION_V3: u32 = 3;
 const HEADER_SIZE: usize = 20;
 const BOARD_SIZE: usize = 8;
 const BOARD_CELLS: usize = BOARD_SIZE * BOARD_SIZE;
+const SYMMETRY_NORMALIZATION_ROTATIONS4: f32 = 0.25;
+const SYMMETRY_NORMALIZATION_DIHEDRAL8: f32 = 0.125;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymmetryMode {
@@ -153,7 +155,13 @@ impl NTupleEvaluator {
                     let start = offset + i * 4;
                     let mut chunk = [0u8; 4];
                     chunk.copy_from_slice(&payload[start..start + 4]);
-                    tuple_weights.push(f32::from_le_bytes(chunk));
+                    let value = f32::from_le_bytes(chunk);
+                    if !value.is_finite() {
+                        return Err(format!(
+                            "non-finite weight at phase #{phase_idx}, tuple #{tuple_idx}, entry #{i}"
+                        ));
+                    }
+                    tuple_weights.push(value);
                 }
 
                 offset += bytes_len;
@@ -193,6 +201,10 @@ impl NTupleEvaluator {
         }
 
         score
+            * match self.symmetry_mode {
+                SymmetryMode::Rotations4 => SYMMETRY_NORMALIZATION_ROTATIONS4,
+                SymmetryMode::Dihedral8 => SYMMETRY_NORMALIZATION_DIHEDRAL8,
+            }
     }
 }
 
@@ -450,6 +462,16 @@ mod tests {
     }
 
     #[test]
+    fn from_bytes_rejects_non_finite_weights() {
+        let tuples = vec![vec![0]];
+        let weights = vec![vec![vec![0.0, f32::NAN, -1.0]]];
+        let bytes = build_weights_blob_v2(&tuples, &weights, 1);
+
+        let err = NTupleEvaluator::from_bytes(&bytes).unwrap_err();
+        assert!(err.contains("non-finite weight"));
+    }
+
+    #[test]
     fn from_bytes_accepts_zstd_compressed_payload() {
         let tuples = vec![vec![0, 1]];
         let weights = vec![vec![vec![0.0; 9]], vec![vec![1.0; 9]]];
@@ -476,8 +498,8 @@ mod tests {
         let black_score = evaluator.evaluate(&board, true);
         let white_score = evaluator.evaluate(&board, false);
 
-        assert_eq!(black_score, 4.0);
-        assert_eq!(white_score, -4.0);
+        assert_eq!(black_score, 1.0);
+        assert_eq!(white_score, -1.0);
     }
 
     #[test]
@@ -493,8 +515,8 @@ mod tests {
         let black_score = evaluator.evaluate(&board, true);
         let white_score = evaluator.evaluate(&board, false);
 
-        assert_eq!(black_score, 8.0);
-        assert_eq!(white_score, -8.0);
+        assert_eq!(black_score, 1.0);
+        assert_eq!(white_score, -1.0);
     }
 
     #[test]
@@ -525,8 +547,8 @@ mod tests {
         let phase0_board = board_with_empty_count(60);
         let phase1_board = board_with_empty_count(58);
 
-        assert_eq!(evaluator.evaluate(&phase0_board, true), 4.0);
-        assert_eq!(evaluator.evaluate(&phase1_board, true), 8.0);
+        assert_eq!(evaluator.evaluate(&phase0_board, true), 1.0);
+        assert_eq!(evaluator.evaluate(&phase1_board, true), 2.0);
     }
 
     #[test]
@@ -537,6 +559,6 @@ mod tests {
         let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
         let late_board = board_with_empty_count(0);
 
-        assert_eq!(evaluator.evaluate(&late_board, true), 4.0);
+        assert_eq!(evaluator.evaluate(&late_board, true), 1.0);
     }
 }

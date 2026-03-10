@@ -35,12 +35,27 @@ const SYMMETRY_COUNT: usize = 8;
 const TUPLE_COUNT: usize = 14;
 const MAX_TUPLE_LEN: usize = 10;
 const TRAINING_SEARCH_DEPTH: u8 = 2;
+const SYMMETRY_NORMALIZATION: f32 = 1.0 / (SYMMETRY_COUNT as f32);
+const MAX_ABS_WEIGHT_UPDATE: f32 = 0.1;
 pub const PHASE_COUNT: usize = 30;
 
 #[derive(Debug, Clone, Copy)]
 struct CompiledTuple {
     len: usize,
     transformed_positions: [[u8; MAX_TUPLE_LEN]; SYMMETRY_COUNT],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrainingHistoryEntry {
+    board: Board,
+    is_black: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScoredTrainingMove {
+    mv: usize,
+    next_board: Board,
+    next_player_eval: f32,
 }
 
 static COMPILED_TUPLES: LazyLock<[CompiledTuple; TUPLE_COUNT]> = LazyLock::new(|| {
@@ -163,6 +178,11 @@ impl TrainableNTuple {
                     ));
                 }
                 for value in weights {
+                    if !value.is_finite() {
+                        return Err(format!(
+                            "weights[{phase_idx}][{tuple_idx}] contains non-finite value"
+                        ));
+                    }
                     data.extend_from_slice(&value.to_le_bytes());
                 }
             }
@@ -303,7 +323,13 @@ impl TrainableNTuple {
                     let start = offset + entry_idx * std::mem::size_of::<f32>();
                     let mut chunk = [0u8; 4];
                     chunk.copy_from_slice(&payload[start..start + 4]);
-                    tuple_weights.push(f32::from_le_bytes(chunk));
+                    let value = f32::from_le_bytes(chunk);
+                    if !value.is_finite() {
+                        return Err(format!(
+                            "non-finite weight at phase #{phase_idx}, tuple #{tuple_idx}, entry #{entry_idx}"
+                        ));
+                    }
+                    tuple_weights.push(value);
                 }
 
                 phase_weights.push(tuple_weights);
@@ -363,7 +389,7 @@ impl TrainableNTuple {
             }
         }
 
-        score
+        score * SYMMETRY_NORMALIZATION
     }
 
     fn apply_delta(
@@ -372,10 +398,11 @@ impl TrainableNTuple {
         indices: &[[usize; TUPLE_COUNT]; SYMMETRY_COUNT],
         delta: f32,
     ) {
+        let normalized_delta = delta * SYMMETRY_NORMALIZATION;
         let phase_weights = &mut self.weights[phase_idx];
         for tuple_indices in indices {
             for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
-                phase_weights[tuple_idx][index] += delta;
+                phase_weights[tuple_idx][index] += normalized_delta;
             }
         }
     }
@@ -467,7 +494,11 @@ impl TrainingNetwork for TrainableNTuple {
             td_error
         };
 
-        self.apply_delta(phase_idx, &indices, alpha * next_cumulative_td);
+        self.apply_delta(
+            phase_idx,
+            &indices,
+            clip_weight_update(alpha * next_cumulative_td),
+        );
         (current_value, next_cumulative_td)
     }
 }
@@ -549,7 +580,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let mut board = Board::new();
         let mut is_black = true;
         let mut consecutive_passes = 0usize;
-        let mut history: Vec<(Board, bool)> = Vec::with_capacity(60);
+        let mut history: Vec<TrainingHistoryEntry> = Vec::with_capacity(60);
 
         self.apply_random_opening(
             &mut board,
@@ -568,7 +599,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
 
             consecutive_passes = 0;
             let mv = self.select_move(&board, is_black, legal)?;
-            history.push((board, is_black));
+            self.push_history_entry(&mut history, &board, is_black);
             let flipped = board.place(mv, is_black);
             if flipped == 0 {
                 return Err(format!("selected illegal move: {mv}"));
@@ -576,7 +607,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             is_black = !is_black;
         }
 
-        self.update_weights(&history, &board);
+        self.update_weights(&history, &board)?;
         Ok(())
     }
 
@@ -585,7 +616,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         board: &mut Board,
         is_black: &mut bool,
         consecutive_passes: &mut usize,
-        history: &mut Vec<(Board, bool)>,
+        history: &mut Vec<TrainingHistoryEntry>,
     ) -> Result<(), String> {
         let mut applied_plies = 0usize;
         while applied_plies < self.random_opening_plies && *consecutive_passes < 2 {
@@ -599,7 +630,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             *consecutive_passes = 0;
             let choice = self.rng.gen_range(0..legal.count_ones());
             let mv = nth_move_from_mask(legal, choice);
-            history.push((*board, *is_black));
+            self.push_history_entry(history, board, *is_black);
             let flipped = board.place(mv, *is_black);
             if flipped == 0 {
                 return Err(format!("selected illegal random opening move: {mv}"));
@@ -622,27 +653,29 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             return Ok(nth_move_from_mask(legal, choice));
         }
 
-        let moves = ordered_moves(board, is_black, legal, |next_board, next_player| {
-            -self.network.evaluate(next_board, next_player)
-        });
-        let mut best_move = moves[0];
+        let moves = self.ordered_training_moves(board, is_black, legal)?;
+        let mut best_move = moves[0].mv;
         let mut best_score = f32::NEG_INFINITY;
+        let beta = f32::INFINITY;
+        let mut alpha = f32::NEG_INFINITY;
 
         for mv in moves {
-            let mut next_board = *board;
-            let flipped = next_board.place(mv, is_black);
-            if flipped == 0 {
-                return Err(format!("selected illegal move: {mv}"));
-            }
-            let score = -self.search_training_position(
-                &next_board,
-                !is_black,
-                TRAINING_SEARCH_DEPTH - 1,
-            )?;
-            if is_better_move(score, mv, best_score, best_move) {
+            let score = if TRAINING_SEARCH_DEPTH == 1 {
+                -mv.next_player_eval
+            } else {
+                -self.search_training_position(
+                    &mv.next_board,
+                    !is_black,
+                    TRAINING_SEARCH_DEPTH - 1,
+                    -beta,
+                    -alpha,
+                )?
+            };
+            if is_better_move(score, mv.mv, best_score, best_move) {
                 best_score = score;
-                best_move = mv;
+                best_move = mv.mv;
             }
+            alpha = alpha.max(score);
         }
 
         Ok(best_move)
@@ -653,9 +686,14 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         board: &Board,
         is_black: bool,
         depth: u8,
+        mut alpha: f32,
+        beta: f32,
     ) -> Result<f32, String> {
         if depth == 0 {
-            return Ok(self.network.evaluate(board, is_black));
+            return ensure_finite(
+                self.network.evaluate(board, is_black),
+                "training leaf evaluation",
+            );
         }
 
         let legal = board.legal_moves(is_black);
@@ -664,35 +702,45 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             if opp_legal == 0 {
                 return Ok(terminal_training_score(board, is_black));
             }
-            return Ok(-self.search_training_position(board, !is_black, depth)?);
+            return Ok(-self.search_training_position(board, !is_black, depth, -beta, -alpha)?);
         }
 
-        let moves = ordered_moves(board, is_black, legal, |next_board, next_player| {
-            -self.network.evaluate(next_board, next_player)
-        });
-        let mut best_move = moves[0];
+        let moves = self.ordered_training_moves(board, is_black, legal)?;
+        let mut best_move = moves[0].mv;
         let mut best_score = f32::NEG_INFINITY;
 
         for mv in moves {
-            let mut next_board = *board;
-            let flipped = next_board.place(mv, is_black);
-            if flipped == 0 {
-                return Err(format!("selected illegal move: {mv}"));
-            }
-
-            let score = -self.search_training_position(&next_board, !is_black, depth - 1)?;
-            if is_better_move(score, mv, best_score, best_move) {
+            let score = if depth == 1 {
+                -mv.next_player_eval
+            } else {
+                -self.search_training_position(
+                    &mv.next_board,
+                    !is_black,
+                    depth - 1,
+                    -beta,
+                    -alpha,
+                )?
+            };
+            if is_better_move(score, mv.mv, best_score, best_move) {
                 best_score = score;
-                best_move = mv;
+                best_move = mv.mv;
+            }
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                break;
             }
         }
 
         Ok(best_score)
     }
 
-    fn update_weights(&mut self, history: &[(Board, bool)], final_board: &Board) {
+    fn update_weights(
+        &mut self,
+        history: &[TrainingHistoryEntry],
+        final_board: &Board,
+    ) -> Result<(), String> {
         if history.is_empty() {
-            return;
+            return Ok(());
         }
 
         let (black_count, white_count) = final_board.count();
@@ -704,7 +752,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             0.0
         };
 
-        let mut next_value = if history.last().expect("history must be non-empty").1 {
+        let mut next_value = if history.last().expect("history must be non-empty").is_black {
             reward
         } else {
             -reward
@@ -712,20 +760,73 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let mut cumulative_td = 0.0f32;
         let mut next_player: Option<bool> = None;
 
-        for &(board, is_black) in history.iter().rev() {
+        for entry in history.iter().rev() {
+            ensure_finite(next_value, "td-lambda next_value")?;
+            ensure_finite(cumulative_td, "td-lambda cumulative_td")?;
             let (current_value, next_cumulative_td) = self.network.td_lambda_step(
-                &board,
-                is_black,
+                &entry.board,
+                entry.is_black,
                 next_value,
                 cumulative_td,
                 next_player,
                 self.alpha,
                 self.lambda_,
             );
-            cumulative_td = next_cumulative_td;
-            next_value = -current_value;
-            next_player = Some(is_black);
+            cumulative_td = ensure_finite(next_cumulative_td, "td-lambda cumulative_td")?;
+            next_value = -ensure_finite(current_value, "td-lambda current_value")?;
+            next_player = Some(entry.is_black);
         }
+
+        Ok(())
+    }
+
+    fn push_history_entry(
+        &self,
+        history: &mut Vec<TrainingHistoryEntry>,
+        board: &Board,
+        is_black: bool,
+    ) {
+        history.push(TrainingHistoryEntry {
+            board: *board,
+            is_black,
+        });
+    }
+
+    fn ordered_training_moves(
+        &self,
+        board: &Board,
+        is_black: bool,
+        legal: u64,
+    ) -> Result<Vec<ScoredTrainingMove>, String> {
+        let mut moves = Vec::with_capacity(legal.count_ones() as usize);
+        let mut remaining = legal;
+
+        while remaining != 0 {
+            let mv = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+
+            let mut next_board = *board;
+            let flipped = next_board.place(mv, is_black);
+            if flipped == 0 {
+                return Err(format!("selected illegal move: {mv}"));
+            }
+
+            moves.push(ScoredTrainingMove {
+                mv,
+                next_player_eval: ensure_finite(
+                    self.network.evaluate(&next_board, !is_black),
+                    "training move ordering evaluation",
+                )?,
+                next_board,
+            });
+        }
+
+        moves.sort_by(|left, right| {
+            left.next_player_eval
+                .total_cmp(&right.next_player_eval)
+                .then_with(|| left.mv.cmp(&right.mv))
+        });
+        Ok(moves)
     }
 }
 
@@ -956,40 +1057,6 @@ fn nth_move_from_mask(mask: u64, target: u32) -> usize {
     }
 }
 
-fn ordered_moves<F>(board: &Board, is_black: bool, legal: u64, mut score_move: F) -> Vec<usize>
-where
-    F: FnMut(&Board, bool) -> f32,
-{
-    let mut scored_moves: Vec<(usize, f32)> = bitboard_to_positions(legal)
-        .into_iter()
-        .map(|mv| {
-            let mut next = *board;
-            let flipped = next.place(mv, is_black);
-            debug_assert_ne!(flipped, 0, "ordered_moves must only score legal moves");
-            let score = score_move(&next, !is_black);
-            (mv, score)
-        })
-        .collect();
-
-    scored_moves.sort_by(|(left_mv, left_score), (right_mv, right_score)| {
-        right_score
-            .total_cmp(left_score)
-            .then_with(|| left_mv.cmp(right_mv))
-    });
-
-    scored_moves.into_iter().map(|(mv, _)| mv).collect()
-}
-
-fn bitboard_to_positions(mut mask: u64) -> Vec<usize> {
-    let mut out = Vec::new();
-    while mask != 0 {
-        let mv = mask.trailing_zeros() as usize;
-        out.push(mv);
-        mask &= mask - 1;
-    }
-    out
-}
-
 fn is_better_move(score: f32, mv: usize, best_score: f32, best_move: usize) -> bool {
     score > best_score || (score == best_score && mv < best_move)
 }
@@ -1000,6 +1067,18 @@ fn terminal_training_score(board: &Board, is_black: bool) -> f32 {
         black_count as f32 - white_count as f32
     } else {
         white_count as f32 - black_count as f32
+    }
+}
+
+fn clip_weight_update(delta: f32) -> f32 {
+    delta.clamp(-MAX_ABS_WEIGHT_UPDATE, MAX_ABS_WEIGHT_UPDATE)
+}
+
+fn ensure_finite(value: f32, label: &str) -> Result<f32, String> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(format!("{label} became non-finite"))
     }
 }
 
@@ -1121,6 +1200,80 @@ mod tests {
         Board::from_bitboards(black, 0)
     }
 
+    fn history_entry(board: Board, is_black: bool) -> TrainingHistoryEntry {
+        TrainingHistoryEntry { board, is_black }
+    }
+
+    fn exhaustive_training_search<N: TrainingNetwork>(
+        network: &N,
+        board: &Board,
+        is_black: bool,
+        depth: u8,
+    ) -> f32 {
+        if depth == 0 {
+            return network.evaluate(board, is_black);
+        }
+
+        let legal = board.legal_moves(is_black);
+        if legal == 0 {
+            let opp_legal = board.legal_moves(!is_black);
+            if opp_legal == 0 {
+                return terminal_training_score(board, is_black);
+            }
+            return -exhaustive_training_search(network, board, !is_black, depth);
+        }
+
+        let mut remaining = legal;
+        let mut best_move = remaining.trailing_zeros() as usize;
+        let mut best_score = f32::NEG_INFINITY;
+        while remaining != 0 {
+            let mv = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+
+            let mut next_board = *board;
+            assert_ne!(next_board.place(mv, is_black), 0);
+            let score = -exhaustive_training_search(network, &next_board, !is_black, depth - 1);
+            if is_better_move(score, mv, best_score, best_move) {
+                best_score = score;
+                best_move = mv;
+            }
+        }
+
+        best_score
+    }
+
+    fn exhaustive_select_move<N: TrainingNetwork>(
+        network: &N,
+        board: &Board,
+        is_black: bool,
+        depth: u8,
+    ) -> usize {
+        let legal = board.legal_moves(is_black);
+        let mut remaining = legal;
+        let mut best_move = remaining.trailing_zeros() as usize;
+        let mut best_score = f32::NEG_INFINITY;
+        while remaining != 0 {
+            let mv = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+
+            let mut next_board = *board;
+            assert_ne!(next_board.place(mv, is_black), 0);
+            let score = -exhaustive_training_search(network, &next_board, !is_black, depth - 1);
+            if is_better_move(score, mv, best_score, best_move) {
+                best_score = score;
+                best_move = mv;
+            }
+        }
+
+        best_move
+    }
+
+    fn black_pass_board() -> Board {
+        let black = 1u64 << 1;
+        let white = u64::MAX ^ 1u64 ^ black;
+        Board::from_bitboards(black, white)
+    }
+
     #[test]
     fn update_direction_is_toward_td_target() {
         let network = RecordingNetwork {
@@ -1128,10 +1281,10 @@ mod tests {
             updates: Vec::new(),
         };
         let mut trainer = TDLambdaTrainer::new(network, 0.5, 0.0, 0.0, 7, 0).unwrap();
-        let history = vec![(Board::new(), true)];
+        let history = vec![history_entry(Board::new(), true)];
         let final_board = Board::from_bitboards(u64::MAX, 0);
 
-        trainer.update_weights(&history, &final_board);
+        trainer.update_weights(&history, &final_board).unwrap();
 
         assert_eq!(trainer.network.updates.len(), 1);
         assert_eq!(trainer.network.updates[0], (true, 0.5));
@@ -1145,10 +1298,10 @@ mod tests {
                 updates: Vec::new(),
             };
             let mut trainer = TDLambdaTrainer::new(network, 1.0, 0.0, 0.0, 11, 0).unwrap();
-            let history = vec![(Board::new(), is_black)];
+            let history = vec![history_entry(Board::new(), is_black)];
             let final_board = Board::from_bitboards(u64::MAX, 0);
 
-            trainer.update_weights(&history, &final_board);
+            trainer.update_weights(&history, &final_board).unwrap();
 
             assert_eq!(trainer.network.updates[0], (is_black, expected));
         }
@@ -1161,10 +1314,13 @@ mod tests {
             updates: Vec::new(),
         };
         let mut trainer = TDLambdaTrainer::new(network, 1.0, 0.5, 0.0, 13, 0).unwrap();
-        let history = vec![(Board::new(), true), (Board::new(), false)];
+        let history = vec![
+            history_entry(Board::new(), true),
+            history_entry(Board::new(), false),
+        ];
         let final_board = Board::from_bitboards(u64::MAX, 0);
 
-        trainer.update_weights(&history, &final_board);
+        trainer.update_weights(&history, &final_board).unwrap();
 
         assert_eq!(trainer.network.updates.len(), 2);
         assert_eq!(trainer.network.updates[0], (false, -1.0));
@@ -1205,8 +1361,8 @@ mod tests {
             network.weights[1][0][phase1_indices[symmetry][0]] = 2.0;
         }
 
-        assert_eq!(network.evaluate(&phase0_board, true), 8.0);
-        assert_eq!(network.evaluate(&phase1_board, true), 16.0);
+        assert_eq!(network.evaluate(&phase0_board, true), 1.0);
+        assert_eq!(network.evaluate(&phase1_board, true), 2.0);
     }
 
     #[test]
@@ -1299,6 +1455,37 @@ mod tests {
     }
 
     #[test]
+    fn to_bytes_rejects_non_finite_weights() {
+        let mut network = TrainableNTuple::new();
+        network.weights[0][0][0] = f32::NAN;
+
+        let err = network.to_bytes().unwrap_err();
+        assert!(err.contains("non-finite"));
+    }
+
+    #[test]
+    fn from_bytes_rejects_non_finite_weights() {
+        let valid_bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
+        let mut bytes = decompress_model_bytes(&valid_bytes).unwrap().into_owned();
+        let tuple_defs_len: usize = TUPLE_PATTERNS.iter().map(|pattern| 1 + pattern.len()).sum();
+        let first_weight_offset = HEADER_SIZE + tuple_defs_len;
+        bytes[first_weight_offset..first_weight_offset + 4]
+            .copy_from_slice(&f32::NAN.to_le_bytes());
+        let crc32 = crc32fast::hash(&bytes[HEADER_SIZE..]);
+        bytes[12..16].copy_from_slice(&crc32.to_le_bytes());
+        let corrupted = compress_model_bytes(&bytes).unwrap();
+
+        let err = TrainableNTuple::from_bytes(&corrupted).unwrap_err();
+        assert!(err.contains("non-finite"));
+    }
+
+    #[test]
+    fn short_training_produces_only_finite_weights() {
+        let bytes = train_to_bytes(64, 0.01, 0.7, 0.1, 42, 1, None, 4, 0, None).unwrap();
+        assert!(TrainableNTuple::from_bytes(&bytes).is_ok());
+    }
+
+    #[test]
     fn split_games_distributes_remainder_to_earliest_workers() {
         assert_eq!(split_games(10, 3), vec![4, 3, 3]);
         assert_eq!(split_games(2, 4), vec![1, 1, 0, 0]);
@@ -1371,5 +1558,46 @@ mod tests {
             trainer.network.evaluations.get() > legal.count_ones() as usize,
             "depth-2 self-play search should evaluate beyond immediate children"
         );
+    }
+
+    #[test]
+    fn alpha_beta_select_move_matches_exhaustive_search_on_opening() {
+        let mut trainer =
+            TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.0, 19, 0).unwrap();
+        let board = Board::new();
+        let expected =
+            exhaustive_select_move(&trainer.network, &board, true, TRAINING_SEARCH_DEPTH);
+
+        let actual = trainer
+            .select_move(&board, true, board.legal_moves(true))
+            .unwrap();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn alpha_beta_search_matches_exhaustive_search_on_pass_position() {
+        let trainer = TDLambdaTrainer::new(TrainableNTuple::new(), 0.01, 0.7, 0.0, 23, 0).unwrap();
+        let board = black_pass_board();
+        assert_eq!(board.legal_moves(true), 0, "black should be forced to pass");
+        assert_ne!(
+            board.legal_moves(false),
+            0,
+            "white should still have a legal move"
+        );
+
+        let expected =
+            exhaustive_training_search(&trainer.network, &board, true, TRAINING_SEARCH_DEPTH);
+        let actual = trainer
+            .search_training_position(
+                &board,
+                true,
+                TRAINING_SEARCH_DEPTH,
+                f32::NEG_INFINITY,
+                f32::INFINITY,
+            )
+            .unwrap();
+
+        assert_eq!(actual, expected);
     }
 }
