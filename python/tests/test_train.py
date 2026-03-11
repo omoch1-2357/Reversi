@@ -46,6 +46,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
             "checkpoints",
             "--resume-from",
             "resume.bin",
+            "--no-verify",
         ]
     )
 
@@ -61,6 +62,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
     assert args.checkpoint_interval == 50
     assert str(args.checkpoint_dir) == "checkpoints"
     assert str(args.resume_from) == "resume.bin"
+    assert args.verify is False
 
 
 def test_main_runs_pipeline_and_outputs_valid_model() -> None:
@@ -134,6 +136,7 @@ def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
 def test_parser_defaults_threads_to_zero() -> None:
     args = build_parser().parse_args([])
     assert args.threads == 0
+    assert args.verify is True
 
 
 def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
@@ -157,6 +160,7 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         checkpoint_interval=0,
         checkpoint_dir=None,
         resume_from=None,
+        verify=True,
     )
     resume_bytes = seed_model.read_bytes()
     calls: list[dict[str, object]] = []
@@ -183,6 +187,7 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
             checkpoint_interval=2,
             checkpoint_dir=checkpoint_dir,
             resume_from=resume,
+            verify=True,
         )
 
         assert result == output

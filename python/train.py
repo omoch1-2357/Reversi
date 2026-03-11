@@ -81,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional existing weights.bin to continue training from.",
     )
+    parser.add_argument(
+        "--verify",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Validate exported model structure and weights after writing.",
+    )
     return parser
 
 
@@ -198,6 +204,7 @@ def train_and_export(
     checkpoint_interval: int,
     checkpoint_dir: Path | None,
     resume_from: Path | None,
+    verify: bool,
 ) -> Path:
     """Run training, export the model, and validate the resulting binary."""
     if games < 0:
@@ -217,7 +224,8 @@ def train_and_export(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     current_model = None
     if resume_from is not None:
-        verify_exported_model(resume_from, NTupleNetwork.TUPLE_PATTERNS)
+        if verify:
+            verify_exported_model(resume_from, NTupleNetwork.TUPLE_PATTERNS)
         current_model = resume_from.read_bytes()
 
     if checkpoint_interval == 0 or games == 0:
@@ -234,7 +242,8 @@ def train_and_export(
             progress_callback=log_training_progress,
         )
         output_path.write_bytes(model_bytes)
-        verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
+        if verify:
+            verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
         return output_path
 
     resolved_checkpoint_dir = checkpoint_dir
@@ -276,10 +285,12 @@ def train_and_export(
             completed_games,
         )
         checkpoint_path.write_bytes(current_model)
-        verify_exported_model(checkpoint_path, NTupleNetwork.TUPLE_PATTERNS)
+        if verify:
+            verify_exported_model(checkpoint_path, NTupleNetwork.TUPLE_PATTERNS)
 
     output_path.write_bytes(current_model)
-    verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
+    if verify:
+        verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
     return output_path
 
 
@@ -295,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
             f"progress_interval={args.progress_interval}, "
             f"random_opening_plies={args.random_opening_plies}, "
             f"checkpoint_interval={args.checkpoint_interval}, "
-            f"resume_from={args.resume_from}"
+            f"resume_from={args.resume_from}, verify={args.verify}"
         )
         start_time = perf_counter()
         output_path = train_and_export(
@@ -311,9 +322,10 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_interval=args.checkpoint_interval,
             checkpoint_dir=args.checkpoint_dir,
             resume_from=args.resume_from,
+            verify=args.verify,
         )
         print(
-            f"Model exported and verified: {output_path} "
+            f"Model exported{(' and verified' if args.verify else '')}: {output_path} "
             f"(elapsed={perf_counter() - start_time:.1f}s)"
         )
         return 0

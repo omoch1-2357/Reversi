@@ -38,17 +38,21 @@ const TRAINING_SEARCH_DEPTH: u8 = 2;
 const SYMMETRY_NORMALIZATION: f32 = 1.0 / (SYMMETRY_COUNT as f32);
 const MAX_ABS_WEIGHT_UPDATE: f32 = 0.1;
 pub const PHASE_COUNT: usize = 30;
+type FeatureIndices = [[usize; TUPLE_COUNT]; SYMMETRY_COUNT];
 
 #[derive(Debug, Clone, Copy)]
 struct CompiledTuple {
     len: usize,
     transformed_positions: [[u8; MAX_TUPLE_LEN]; SYMMETRY_COUNT],
+    radix_weights: [usize; MAX_TUPLE_LEN],
 }
 
 #[derive(Debug, Clone, Copy)]
 struct TrainingHistoryEntry {
     board: Board,
     is_black: bool,
+    phase_idx: usize,
+    feature_indices: FeatureIndices,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,10 +62,17 @@ struct ScoredTrainingMove {
     next_player_eval: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PositionOccurrence {
+    tuple_idx: usize,
+    cell_idx: usize,
+}
+
 static COMPILED_TUPLES: LazyLock<[CompiledTuple; TUPLE_COUNT]> = LazyLock::new(|| {
     std::array::from_fn(|tuple_idx| {
         let pattern = TUPLE_PATTERNS[tuple_idx];
         let mut transformed_positions = [[0u8; MAX_TUPLE_LEN]; SYMMETRY_COUNT];
+        let mut radix_weights = [0usize; MAX_TUPLE_LEN];
 
         for symmetry in 0..SYMMETRY_COUNT {
             for (cell_idx, &pos) in pattern.iter().enumerate() {
@@ -69,17 +80,74 @@ static COMPILED_TUPLES: LazyLock<[CompiledTuple; TUPLE_COUNT]> = LazyLock::new(|
                     transform_pos(pos, symmetry as u8) as u8;
             }
         }
+        for cell_idx in 0..pattern.len() {
+            radix_weights[cell_idx] =
+                pow3(pattern.len() - 1 - cell_idx).expect("tuple radix weight must fit usize");
+        }
 
         CompiledTuple {
             len: pattern.len(),
             transformed_positions,
+            radix_weights,
         }
     })
 });
 
+static POSITION_OCCURRENCES: LazyLock<[[Vec<PositionOccurrence>; 64]; SYMMETRY_COUNT]> =
+    LazyLock::new(|| {
+        std::array::from_fn(|symmetry| {
+            std::array::from_fn(|pos| {
+                let mut occurrences = Vec::new();
+                for tuple_idx in 0..TUPLE_COUNT {
+                    let compiled = &COMPILED_TUPLES[tuple_idx];
+                    for cell_idx in 0..compiled.len {
+                        if compiled.transformed_positions[symmetry][cell_idx] as usize == pos {
+                            occurrences.push(PositionOccurrence {
+                                tuple_idx,
+                                cell_idx,
+                            });
+                        }
+                    }
+                }
+                occurrences
+            })
+        })
+    });
+
 pub trait TrainingNetwork {
     fn evaluate(&self, board: &Board, is_black: bool) -> f32;
     fn update(&mut self, board: &Board, is_black: bool, delta: f32);
+    fn evaluate_precomputed(
+        &self,
+        board: &Board,
+        is_black: bool,
+        _phase_idx: usize,
+        _feature_indices: &FeatureIndices,
+    ) -> f32 {
+        self.evaluate(board, is_black)
+    }
+    fn td_lambda_step_precomputed(
+        &mut self,
+        board: &Board,
+        is_black: bool,
+        _phase_idx: usize,
+        _feature_indices: &FeatureIndices,
+        next_value: f32,
+        cumulative_td: f32,
+        next_player: Option<bool>,
+        alpha: f32,
+        lambda_: f32,
+    ) -> (f32, f32) {
+        self.td_lambda_step(
+            board,
+            is_black,
+            next_value,
+            cumulative_td,
+            next_player,
+            alpha,
+            lambda_,
+        )
+    }
 
     fn td_lambda_step(
         &mut self,
@@ -348,10 +416,7 @@ impl TrainableNTuple {
         })
     }
 
-    fn compute_feature_indices(
-        board: &Board,
-        is_black: bool,
-    ) -> [[usize; TUPLE_COUNT]; SYMMETRY_COUNT] {
+    fn compute_feature_indices(board: &Board, is_black: bool) -> FeatureIndices {
         let (black, white) = board.bitboards();
         let (me, opp) = if is_black {
             (black, white)
@@ -369,6 +434,44 @@ impl TrainableNTuple {
                     me,
                     opp,
                 );
+            }
+        }
+
+        indices
+    }
+
+    fn update_feature_indices_from_transition(
+        previous: &FeatureIndices,
+        old_board: &Board,
+        new_board: &Board,
+        is_black: bool,
+    ) -> FeatureIndices {
+        let (old_black, old_white) = old_board.bitboards();
+        let (new_black, new_white) = new_board.bitboards();
+        let mut indices = *previous;
+        let mut changed = (old_black ^ new_black) | (old_white ^ new_white);
+
+        while changed != 0 {
+            let pos = changed.trailing_zeros() as usize;
+            changed &= changed - 1;
+
+            let old_state =
+                cell_state_from_bitboards_for_player_view(old_black, old_white, pos, is_black);
+            let new_state =
+                cell_state_from_bitboards_for_player_view(new_black, new_white, pos, is_black);
+            if old_state == new_state {
+                continue;
+            }
+
+            let delta = new_state - old_state;
+            for symmetry in 0..SYMMETRY_COUNT {
+                for occurrence in &POSITION_OCCURRENCES[symmetry][pos] {
+                    let radix = COMPILED_TUPLES[occurrence.tuple_idx].radix_weights
+                        [occurrence.cell_idx] as isize;
+                    indices[symmetry][occurrence.tuple_idx] =
+                        ((indices[symmetry][occurrence.tuple_idx] as isize) + delta * radix)
+                            as usize;
+                }
             }
         }
 
@@ -497,6 +600,49 @@ impl TrainingNetwork for TrainableNTuple {
         self.apply_delta(
             phase_idx,
             &indices,
+            clip_weight_update(alpha * next_cumulative_td),
+        );
+        (current_value, next_cumulative_td)
+    }
+
+    fn evaluate_precomputed(
+        &self,
+        _board: &Board,
+        _is_black: bool,
+        phase_idx: usize,
+        feature_indices: &FeatureIndices,
+    ) -> f32 {
+        self.sum_feature_indices(phase_idx, feature_indices)
+    }
+
+    fn td_lambda_step_precomputed(
+        &mut self,
+        _board: &Board,
+        is_black: bool,
+        phase_idx: usize,
+        feature_indices: &FeatureIndices,
+        next_value: f32,
+        cumulative_td: f32,
+        next_player: Option<bool>,
+        alpha: f32,
+        lambda_: f32,
+    ) -> (f32, f32) {
+        let current_value = self.sum_feature_indices(phase_idx, feature_indices);
+        let td_error = next_value - current_value;
+        let next_cumulative_td = if let Some(previous_player) = next_player {
+            let signed_lambda = if is_black == previous_player {
+                lambda_
+            } else {
+                -lambda_
+            };
+            td_error + signed_lambda * cumulative_td
+        } else {
+            td_error
+        };
+
+        self.apply_delta(
+            phase_idx,
+            feature_indices,
             clip_weight_update(alpha * next_cumulative_td),
         );
         (current_value, next_cumulative_td)
@@ -756,9 +902,11 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         for entry in history.iter().rev() {
             ensure_finite(next_value, "td-lambda next_value")?;
             ensure_finite(cumulative_td, "td-lambda cumulative_td")?;
-            let (current_value, next_cumulative_td) = self.network.td_lambda_step(
+            let (current_value, next_cumulative_td) = self.network.td_lambda_step_precomputed(
                 &entry.board,
                 entry.is_black,
+                entry.phase_idx,
+                &entry.feature_indices,
                 next_value,
                 cumulative_td,
                 next_player,
@@ -779,9 +927,13 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         board: &Board,
         is_black: bool,
     ) {
+        let phase_idx = phase_index_for_board(board, PHASE_COUNT);
+        let feature_indices = TrainableNTuple::compute_feature_indices(board, is_black);
         history.push(TrainingHistoryEntry {
             board: *board,
             is_black,
+            phase_idx,
+            feature_indices,
         });
     }
 
@@ -793,6 +945,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
     ) -> Result<Vec<ScoredTrainingMove>, String> {
         let mut moves = Vec::with_capacity(legal.count_ones() as usize);
         let mut remaining = legal;
+        let next_player_indices = TrainableNTuple::compute_feature_indices(board, !is_black);
 
         while remaining != 0 {
             let mv = remaining.trailing_zeros() as usize;
@@ -803,11 +956,23 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             if flipped == 0 {
                 return Err(format!("selected illegal move: {mv}"));
             }
+            let phase_idx = phase_index_for_board(&next_board, PHASE_COUNT);
+            let delta_indices = TrainableNTuple::update_feature_indices_from_transition(
+                &next_player_indices,
+                board,
+                &next_board,
+                !is_black,
+            );
 
             moves.push(ScoredTrainingMove {
                 mv,
                 next_player_eval: ensure_finite(
-                    self.network.evaluate(&next_board, !is_black),
+                    self.network.evaluate_precomputed(
+                        &next_board,
+                        !is_black,
+                        phase_idx,
+                        &delta_indices,
+                    ),
                     "training move ordering evaluation",
                 )?,
                 next_board,
@@ -1143,6 +1308,20 @@ fn cell_state(me: u64, opp: u64, pos: usize) -> usize {
     }
 }
 
+fn cell_state_from_bitboards_for_player_view(
+    black: u64,
+    white: u64,
+    pos: usize,
+    is_black: bool,
+) -> isize {
+    let (me, opp) = if is_black {
+        (black, white)
+    } else {
+        (white, black)
+    };
+    cell_state(me, opp, pos) as isize
+}
+
 fn pow3(exp: usize) -> Result<usize, String> {
     let mut out = 1usize;
     for _ in 0..exp {
@@ -1194,7 +1373,12 @@ mod tests {
     }
 
     fn history_entry(board: Board, is_black: bool) -> TrainingHistoryEntry {
-        TrainingHistoryEntry { board, is_black }
+        TrainingHistoryEntry {
+            board,
+            is_black,
+            phase_idx: phase_index_for_board(&board, PHASE_COUNT),
+            feature_indices: TrainableNTuple::compute_feature_indices(&board, is_black),
+        }
     }
 
     fn exhaustive_training_search<N: TrainingNetwork>(
@@ -1368,6 +1552,24 @@ mod tests {
 
         assert_eq!(network.weights[0][0][indices[0][0]], 0.0);
         assert!(network.weights[1][0][indices[0][0]] > 0.0);
+    }
+
+    #[test]
+    fn transition_feature_indices_match_full_recompute() {
+        let board = Board::new();
+        let mut next_board = board;
+        assert_ne!(next_board.place(19, true), 0);
+
+        let previous = TrainableNTuple::compute_feature_indices(&board, false);
+        let delta = TrainableNTuple::update_feature_indices_from_transition(
+            &previous,
+            &board,
+            &next_board,
+            false,
+        );
+        let recomputed = TrainableNTuple::compute_feature_indices(&next_board, false);
+
+        assert_eq!(delta, recomputed);
     }
 
     #[test]
