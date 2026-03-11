@@ -727,12 +727,16 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let mut is_black = true;
         let mut consecutive_passes = 0usize;
         let mut history: Vec<TrainingHistoryEntry> = Vec::with_capacity(60);
+        let mut black_feature_indices = TrainableNTuple::compute_feature_indices(&board, true);
+        let mut white_feature_indices = TrainableNTuple::compute_feature_indices(&board, false);
 
         self.apply_random_opening(
             &mut board,
             &mut is_black,
             &mut consecutive_passes,
             &mut history,
+            &mut black_feature_indices,
+            &mut white_feature_indices,
         )?;
 
         while consecutive_passes < 2 {
@@ -744,12 +748,35 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             }
 
             consecutive_passes = 0;
-            let mv = self.select_move(&board, is_black, legal)?;
-            self.push_history_entry(&mut history, &board, is_black);
+            let current_feature_indices = if is_black {
+                &black_feature_indices
+            } else {
+                &white_feature_indices
+            };
+            let mv = self.select_move_with_feature_indices(
+                &board,
+                is_black,
+                legal,
+                current_feature_indices,
+            )?;
+            self.push_history_entry(&mut history, &board, is_black, current_feature_indices);
+            let previous_board = board;
             let flipped = board.place(mv, is_black);
             if flipped == 0 {
                 return Err(format!("selected illegal move: {mv}"));
             }
+            black_feature_indices = TrainableNTuple::update_feature_indices_from_transition(
+                &black_feature_indices,
+                &previous_board,
+                &board,
+                true,
+            );
+            white_feature_indices = TrainableNTuple::update_feature_indices_from_transition(
+                &white_feature_indices,
+                &previous_board,
+                &board,
+                false,
+            );
             is_black = !is_black;
         }
 
@@ -763,6 +790,8 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         is_black: &mut bool,
         consecutive_passes: &mut usize,
         history: &mut Vec<TrainingHistoryEntry>,
+        black_feature_indices: &mut FeatureIndices,
+        white_feature_indices: &mut FeatureIndices,
     ) -> Result<(), String> {
         let mut applied_plies = 0usize;
         while applied_plies < self.random_opening_plies && *consecutive_passes < 2 {
@@ -776,11 +805,29 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             *consecutive_passes = 0;
             let choice = self.rng.gen_range(0..legal.count_ones());
             let mv = nth_move_from_mask(legal, choice);
-            self.push_history_entry(history, board, *is_black);
+            let current_feature_indices = if *is_black {
+                &*black_feature_indices
+            } else {
+                &*white_feature_indices
+            };
+            self.push_history_entry(history, board, *is_black, current_feature_indices);
+            let previous_board = *board;
             let flipped = board.place(mv, *is_black);
             if flipped == 0 {
                 return Err(format!("selected illegal random opening move: {mv}"));
             }
+            *black_feature_indices = TrainableNTuple::update_feature_indices_from_transition(
+                &*black_feature_indices,
+                &previous_board,
+                board,
+                true,
+            );
+            *white_feature_indices = TrainableNTuple::update_feature_indices_from_transition(
+                &*white_feature_indices,
+                &previous_board,
+                board,
+                false,
+            );
             *is_black = !*is_black;
             applied_plies += 1;
         }
@@ -788,7 +835,19 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn select_move(&mut self, board: &Board, is_black: bool, legal: u64) -> Result<usize, String> {
+        let player_feature_indices = TrainableNTuple::compute_feature_indices(board, is_black);
+        self.select_move_with_feature_indices(board, is_black, legal, &player_feature_indices)
+    }
+
+    fn select_move_with_feature_indices(
+        &mut self,
+        board: &Board,
+        is_black: bool,
+        legal: u64,
+        player_feature_indices: &FeatureIndices,
+    ) -> Result<usize, String> {
         if legal == 0 {
             return Err("legal move mask contains no moves".to_string());
         }
@@ -797,6 +856,10 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         if self.rng.gen_bool(self.epsilon) {
             let choice = self.rng.gen_range(0..move_count);
             return Ok(nth_move_from_mask(legal, choice));
+        }
+
+        if TRAINING_SEARCH_DEPTH == 2 {
+            return self.select_move_depth_two(board, is_black, legal, player_feature_indices);
         }
 
         let moves = self.ordered_training_moves(board, is_black, legal)?;
@@ -820,6 +883,51 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             if is_better_move(score, mv.mv, best_score, best_move) {
                 best_score = score;
                 best_move = mv.mv;
+            }
+            alpha = alpha.max(score);
+        }
+
+        Ok(best_move)
+    }
+
+    fn select_move_depth_two(
+        &self,
+        board: &Board,
+        is_black: bool,
+        legal: u64,
+        player_feature_indices: &FeatureIndices,
+    ) -> Result<usize, String> {
+        let mut remaining = legal;
+        let mut best_move = remaining.trailing_zeros() as usize;
+        let mut best_score = f32::NEG_INFINITY;
+        let beta = f32::INFINITY;
+        let mut alpha = f32::NEG_INFINITY;
+
+        while remaining != 0 {
+            let mv = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+
+            let mut next_board = *board;
+            let flipped = next_board.place(mv, is_black);
+            if flipped == 0 {
+                return Err(format!("selected illegal move: {mv}"));
+            }
+            let child_next_player_indices = TrainableNTuple::update_feature_indices_from_transition(
+                player_feature_indices,
+                board,
+                &next_board,
+                is_black,
+            );
+            let score = -self.search_training_position_depth_one(
+                &next_board,
+                !is_black,
+                -beta,
+                -alpha,
+                Some(&child_next_player_indices),
+            )?;
+            if is_better_move(score, mv, best_score, best_move) {
+                best_score = score;
+                best_move = mv;
             }
             alpha = alpha.max(score);
         }
@@ -851,6 +959,10 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             return Ok(-self.search_training_position(board, !is_black, depth, -beta, -alpha)?);
         }
 
+        if depth == 1 {
+            return self.search_training_position_depth_one(board, is_black, alpha, beta, None);
+        }
+
         let moves = self.ordered_training_moves(board, is_black, legal)?;
         let mut best_move = moves[0].mv;
         let mut best_score = f32::NEG_INFINITY;
@@ -870,6 +982,74 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             if is_better_move(score, mv.mv, best_score, best_move) {
                 best_score = score;
                 best_move = mv.mv;
+            }
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        Ok(best_score)
+    }
+
+    fn search_training_position_depth_one(
+        &self,
+        board: &Board,
+        is_black: bool,
+        mut alpha: f32,
+        beta: f32,
+        next_player_indices: Option<&FeatureIndices>,
+    ) -> Result<f32, String> {
+        let legal = board.legal_moves(is_black);
+        if legal == 0 {
+            let opp_legal = board.legal_moves(!is_black);
+            if opp_legal == 0 {
+                return Ok(terminal_training_score(board, is_black));
+            }
+            return Ok(
+                -self.search_training_position_depth_one(board, !is_black, -beta, -alpha, None)?
+            );
+        }
+
+        let owned_next_player_indices;
+        let next_player_indices = if let Some(indices) = next_player_indices {
+            indices
+        } else {
+            owned_next_player_indices = TrainableNTuple::compute_feature_indices(board, !is_black);
+            &owned_next_player_indices
+        };
+        let mut remaining = legal;
+        let mut best_move = remaining.trailing_zeros() as usize;
+        let mut best_score = f32::NEG_INFINITY;
+
+        while remaining != 0 {
+            let mv = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+
+            let mut next_board = *board;
+            let flipped = next_board.place(mv, is_black);
+            if flipped == 0 {
+                return Err(format!("selected illegal move: {mv}"));
+            }
+            let phase_idx = phase_index_for_board(&next_board, PHASE_COUNT);
+            let delta_indices = TrainableNTuple::update_feature_indices_from_transition(
+                &next_player_indices,
+                board,
+                &next_board,
+                !is_black,
+            );
+            let score = -ensure_finite(
+                self.network.evaluate_precomputed(
+                    &next_board,
+                    !is_black,
+                    phase_idx,
+                    &delta_indices,
+                ),
+                "training move ordering evaluation",
+            )?;
+            if is_better_move(score, mv, best_score, best_move) {
+                best_score = score;
+                best_move = mv;
             }
             alpha = alpha.max(score);
             if alpha >= beta {
@@ -926,14 +1106,14 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         history: &mut Vec<TrainingHistoryEntry>,
         board: &Board,
         is_black: bool,
+        feature_indices: &FeatureIndices,
     ) {
         let phase_idx = phase_index_for_board(board, PHASE_COUNT);
-        let feature_indices = TrainableNTuple::compute_feature_indices(board, is_black);
         history.push(TrainingHistoryEntry {
             board: *board,
             is_black,
             phase_idx,
-            feature_indices,
+            feature_indices: *feature_indices,
         });
     }
 

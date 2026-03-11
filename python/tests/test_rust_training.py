@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-
 import pytest
 
 import rust_training
@@ -8,6 +7,8 @@ import rust_training
 def test_train_to_bytes_raises_clear_error_when_extension_is_missing(
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
+
     def _raise(_name: str):
         raise ModuleNotFoundError("missing extension", name="_reversi_training")
 
@@ -28,6 +29,8 @@ def test_train_to_bytes_raises_clear_error_when_extension_is_missing(
 
 
 def test_train_to_bytes_propagates_internal_import_error(monkeypatch) -> None:
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
+
     def _raise(_name: str):
         raise ImportError("dependency ABI mismatch", name="numpy")
 
@@ -50,6 +53,7 @@ def test_train_to_bytes_propagates_internal_import_error(monkeypatch) -> None:
 def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     captured: dict[str, object] = {}
     callback_calls: list[tuple[int, int, float]] = []
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
 
     def _train_to_bytes(**kwargs):
         captured.update(kwargs)
@@ -92,8 +96,55 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     assert callback_calls == [(1, 3, 0.25)]
 
 
+def test_train_to_bytes_prefers_local_release_extension(monkeypatch) -> None:
+    class _FakePath:
+        def exists(self) -> bool:
+            return True
+
+    release_path = _FakePath()
+
+    monkeypatch.setattr(
+        rust_training,
+        "_candidate_extension_paths",
+        lambda: (release_path,),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _train_to_bytes(**kwargs):
+        captured.update(kwargs)
+        return b"release-model"
+
+    monkeypatch.setattr(
+        rust_training,
+        "_load_extension_from_path",
+        lambda path: SimpleNamespace(train_to_bytes=_train_to_bytes),
+    )
+    monkeypatch.setattr(
+        rust_training,
+        "import_module",
+        lambda _name: pytest.fail("import_module should not be used"),
+    )
+
+    payload = rust_training.train_to_bytes(
+        games=2,
+        alpha=0.01,
+        lambda_=0.7,
+        epsilon=0.1,
+        seed=7,
+        threads=0,
+        initial_model=None,
+        random_opening_plies=0,
+        progress_interval=0,
+    )
+
+    assert payload == b"release-model"
+    assert captured["threads"] == 0
+
+
 def test_model_byte_helpers_delegate_to_extension(monkeypatch) -> None:
     captured: dict[str, bytes] = {}
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
 
     def _compress_model_bytes(data: bytes) -> bytes:
         captured["compress"] = data
@@ -122,6 +173,7 @@ def test_train_to_bytes_falls_back_for_legacy_extension_when_threads_is_one(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
 
     def _train_to_bytes(**kwargs):
         if "threads" in kwargs:
@@ -156,6 +208,8 @@ def test_train_to_bytes_falls_back_for_legacy_extension_when_threads_is_one(
 def test_train_to_bytes_rejects_parallel_threads_with_legacy_extension(
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
+
     def _train_to_bytes(**kwargs):
         raise TypeError("train_to_bytes() got an unexpected keyword argument 'threads'")
 
