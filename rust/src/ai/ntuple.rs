@@ -209,7 +209,8 @@ impl NTupleEvaluator {
 }
 
 fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
-    let plies = 60usize.saturating_sub(board.empty_count() as usize);
+    let (black, white) = board.bitboards();
+    let plies = ((black | white).count_ones() as usize).saturating_sub(4);
     (plies / 2).min(phase_count.saturating_sub(1))
 }
 

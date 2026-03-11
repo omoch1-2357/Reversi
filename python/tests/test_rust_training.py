@@ -96,6 +96,42 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     assert callback_calls == [(1, 3, 0.25)]
 
 
+def test_train_to_uncompressed_bytes_delegates_to_extension(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(rust_training, "_candidate_extension_paths", lambda: ())
+
+    def _train_to_uncompressed_bytes(**kwargs):
+        captured.update(kwargs)
+        return b"raw-model-bytes"
+
+    monkeypatch.setattr(
+        rust_training,
+        "import_module",
+        lambda _name: SimpleNamespace(
+            train_to_uncompressed_bytes=_train_to_uncompressed_bytes
+        ),
+    )
+
+    payload = rust_training.train_to_uncompressed_bytes(
+        games=4,
+        alpha=0.2,
+        lambda_=0.8,
+        epsilon=0.05,
+        seed=99,
+        threads=0,
+        initial_model=b"checkpoint-bytes",
+        random_opening_plies=4,
+        progress_interval=2,
+    )
+
+    assert payload == b"raw-model-bytes"
+    assert captured["games"] == 4
+    assert captured["threads"] == 0
+    assert captured["initial_model"] == b"checkpoint-bytes"
+    assert captured["random_opening_plies"] == 4
+    assert captured["progress_interval"] == 2
+
+
 def test_train_to_bytes_prefers_local_release_extension(monkeypatch) -> None:
     class _FakePath:
         def exists(self) -> bool:

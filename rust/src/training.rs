@@ -200,7 +200,7 @@ impl TrainableNTuple {
         Self::from_uncompressed_bytes(bytes.as_ref())
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+    pub fn to_uncompressed_bytes(&self) -> Result<Vec<u8>, String> {
         if self.phase_count == 0 {
             return Err("phase_count must be greater than 0".to_string());
         }
@@ -264,6 +264,11 @@ impl TrainableNTuple {
         output.extend_from_slice(&crc32.to_le_bytes());
         output.extend_from_slice(&(self.phase_count as u32).to_le_bytes());
         output.extend_from_slice(&data);
+        Ok(output)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        let output = self.to_uncompressed_bytes()?;
         compress_model_bytes(&output)
     }
 
@@ -1269,6 +1274,33 @@ pub fn train_to_bytes(
     network.to_bytes()
 }
 
+pub fn train_to_uncompressed_bytes(
+    games: usize,
+    alpha: f32,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    threads: usize,
+    initial_model: Option<&[u8]>,
+    random_opening_plies: usize,
+    progress_interval: usize,
+    progress_callback: Option<ProgressCallback<'_>>,
+) -> Result<Vec<u8>, String> {
+    let network = train_network(
+        games,
+        alpha,
+        lambda_,
+        epsilon,
+        seed,
+        threads,
+        initial_model,
+        random_opening_plies,
+        progress_interval,
+        progress_callback,
+    )?;
+    network.to_uncompressed_bytes()
+}
+
 fn train_network(
     games: usize,
     alpha: f32,
@@ -1518,7 +1550,8 @@ fn worker_seed(base_seed: u64, worker_idx: usize) -> u64 {
 }
 
 fn phase_index_for_board(board: &Board, phase_count: usize) -> usize {
-    let plies = 60usize.saturating_sub(board.empty_count() as usize);
+    let (black, white) = board.bitboards();
+    let plies = ((black | white).count_ones() as usize).saturating_sub(4);
     (plies / 2).min(phase_count.saturating_sub(1))
 }
 

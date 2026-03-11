@@ -81,8 +81,7 @@ impl Board {
 
     /// Returns the number of empty squares.
     pub fn empty_count(&self) -> u8 {
-        let (black_count, white_count) = self.count();
-        NUM_SQUARES as u8 - black_count - white_count
+        NUM_SQUARES as u8 - (self.black | self.white).count_ones() as u8
     }
 
     /// Converts board to `[u8; 64]` where 0=empty, 1=black, 2=white.

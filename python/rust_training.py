@@ -111,6 +111,48 @@ def train_to_bytes(
         return bytes(module.train_to_bytes(**kwargs))
 
 
+def train_to_uncompressed_bytes(
+    games: int,
+    alpha: float,
+    lambda_: float,
+    epsilon: float,
+    seed: int,
+    threads: int,
+    initial_model: bytes | None,
+    random_opening_plies: int,
+    progress_interval: int,
+    progress_callback: ProgressCallback | None = None,
+) -> bytes:
+    module = _load_extension()
+    kwargs = dict(
+        games=games,
+        alpha=alpha,
+        lambda_=lambda_,
+        epsilon=epsilon,
+        seed=seed,
+        threads=threads,
+        progress_interval=progress_interval,
+        progress_callback=progress_callback,
+    )
+    if initial_model is not None:
+        kwargs["initial_model"] = bytes(initial_model)
+    if random_opening_plies != 0:
+        kwargs["random_opening_plies"] = random_opening_plies
+    try:
+        return bytes(module.train_to_uncompressed_bytes(**kwargs))
+    except TypeError as exc:
+        if "threads" not in str(exc):
+            raise
+        if threads != 1:
+            raise RuntimeError(
+                "Installed Rust training extension does not support `threads`. "
+                "Rebuild and reinstall the extension before using parallel training."
+            ) from exc
+
+        kwargs.pop("threads")
+        return bytes(module.train_to_uncompressed_bytes(**kwargs))
+
+
 def compress_model_bytes(data: bytes) -> bytes:
     module = _load_extension()
     return bytes(module.compress_model_bytes(bytes(data)))
