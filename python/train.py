@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--games", type=int, default=500_000, help="Number of self-play games."
     )
-    parser.add_argument("--alpha", type=float, default=0.01, help="Learning rate.")
+    parser.add_argument("--alpha", type=float, default=0.001, help="Learning rate.")
     parser.add_argument(
         "--lambda",
         type=float,

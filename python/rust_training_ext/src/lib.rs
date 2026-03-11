@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 
 #[pyfunction(signature = (
     games,
-    alpha = 0.01,
+    alpha = 0.001,
     lambda_ = 0.7,
     epsilon = 0.1,
     seed = 42,

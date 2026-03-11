@@ -29,15 +29,15 @@ def test_update_direction_is_toward_td_target() -> None:
     assert len(ntuple.updates) == 1
     is_black, delta = ntuple.updates[0]
     assert is_black is True
-    assert delta == pytest.approx(0.5)
+    assert delta == pytest.approx(32.0)
     assert delta > 0.0
 
 
 @pytest.mark.parametrize(
     ("is_black", "expected_delta"),
     [
-        (True, 1.0),
-        (False, -1.0),
+        (True, 64.0),
+        (False, -64.0),
     ],
 )
 def test_terminal_reward_is_reflected_per_player_perspective(
@@ -65,9 +65,9 @@ def test_update_weights_uses_lambda_return_across_multiple_steps() -> None:
     assert len(ntuple.updates) == 2
     # Reverse traversal: last state (white-to-move), then first state (black-to-move).
     assert ntuple.updates[0][0] is False
-    assert ntuple.updates[0][1] == pytest.approx(-1.0)
+    assert ntuple.updates[0][1] == pytest.approx(-64.0)
     assert ntuple.updates[1][0] is True
-    assert ntuple.updates[1][1] == pytest.approx(0.5)
+    assert ntuple.updates[1][1] == pytest.approx(32.0)
     assert ntuple.updates[0][1] < 0.0
     assert ntuple.updates[1][1] > 0.0
 

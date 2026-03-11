@@ -743,14 +743,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
             return Ok(());
         }
 
-        let (black_count, white_count) = final_board.count();
-        let reward = if black_count > white_count {
-            1.0
-        } else if black_count < white_count {
-            -1.0
-        } else {
-            0.0
-        };
+        let reward = terminal_training_score(final_board, true);
 
         let mut next_value = if history.last().expect("history must be non-empty").is_black {
             reward
@@ -1287,12 +1280,12 @@ mod tests {
         trainer.update_weights(&history, &final_board).unwrap();
 
         assert_eq!(trainer.network.updates.len(), 1);
-        assert_eq!(trainer.network.updates[0], (true, 0.5));
+        assert_eq!(trainer.network.updates[0], (true, 32.0));
     }
 
     #[test]
     fn terminal_reward_is_reflected_per_player_perspective() {
-        for (is_black, expected) in [(true, 1.0f32), (false, -1.0f32)] {
+        for (is_black, expected) in [(true, 64.0f32), (false, -64.0f32)] {
             let network = RecordingNetwork {
                 value: 0.0,
                 updates: Vec::new(),
@@ -1323,8 +1316,8 @@ mod tests {
         trainer.update_weights(&history, &final_board).unwrap();
 
         assert_eq!(trainer.network.updates.len(), 2);
-        assert_eq!(trainer.network.updates[0], (false, -1.0));
-        assert_eq!(trainer.network.updates[1], (true, 0.5));
+        assert_eq!(trainer.network.updates[0], (false, -64.0));
+        assert_eq!(trainer.network.updates[1], (true, 32.0));
     }
 
     #[test]

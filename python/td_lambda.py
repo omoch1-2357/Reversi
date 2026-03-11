@@ -118,12 +118,7 @@ class TDLambdaTrainer:
             return
 
         black_count, white_count = final_board.count()
-        if black_count > white_count:
-            reward = 1.0
-        elif black_count < white_count:
-            reward = -1.0
-        else:
-            reward = 0.0
+        reward = float(black_count - white_count)
 
         # Align terminal reward with the side to move in the last recorded state.
         next_value = reward if history[-1][1] else -reward

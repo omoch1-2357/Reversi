@@ -683,13 +683,8 @@ class TDLambdaTrainer:
     def _update_weights(self, history, final_board):
         """ゲーム終了後、TD-Lambda で逆順に重みを更新"""
         black_count, white_count = final_board.count()
-        # 終局報酬: 黒視点で +1(勝ち) / 0(引分) / -1(負け)
-        if black_count > white_count:
-            reward = 1.0
-        elif black_count < white_count:
-            reward = -1.0
-        else:
-            reward = 0.0
+        # 終局報酬: 黒視点の最終石差
+        reward = float(black_count - white_count)
 
         # 逆順に TD 誤差を伝播
         next_value = reward
@@ -713,7 +708,7 @@ class TDLambdaTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=500_000)
-    parser.add_argument("--alpha", type=float, default=0.01)
+    parser.add_argument("--alpha", type=float, default=0.001)
     parser.add_argument("--lambda", type=float, default=0.7, dest="lambda_")
     parser.add_argument("--epsilon", type=float, default=0.1)
     parser.add_argument("--threads", type=int, default=1)  # 0=利用可能CPU数
