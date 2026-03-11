@@ -38,7 +38,7 @@ const TRAINING_SEARCH_DEPTH: u8 = 2;
 const SYMMETRY_NORMALIZATION: f32 = 1.0 / (SYMMETRY_COUNT as f32);
 const MAX_ABS_WEIGHT_UPDATE: f32 = 0.1;
 pub const PHASE_COUNT: usize = 30;
-type FeatureIndices = [[usize; TUPLE_COUNT]; SYMMETRY_COUNT];
+type FeatureIndices = [[u16; TUPLE_COUNT]; SYMMETRY_COUNT];
 
 #[derive(Debug, Clone, Copy)]
 struct CompiledTuple {
@@ -290,6 +290,90 @@ impl TrainableNTuple {
         Ok(merged)
     }
 
+    fn merge_weighted_parallel(
+        workers: &[(TrainableNTuple, usize)],
+        total_games: usize,
+        threads: usize,
+    ) -> Result<Self, String> {
+        if total_games == 0 || threads <= 1 || PHASE_COUNT <= 1 {
+            return Self::merge_weighted(workers, total_games);
+        }
+
+        let scales: Vec<f32> = workers
+            .iter()
+            .map(|(_, games)| (*games as f32) / (total_games as f32))
+            .collect();
+        let merge_threads = threads.min(PHASE_COUNT);
+        let phase_ranges = split_games(PHASE_COUNT, merge_threads);
+
+        let merged_phases =
+            std::thread::scope(|scope| -> Result<Vec<(usize, Vec<Vec<f32>>)>, String> {
+                let mut handles = Vec::with_capacity(merge_threads);
+                let mut start_phase = 0usize;
+
+                for phase_count in phase_ranges {
+                    let phase_start = start_phase;
+                    start_phase += phase_count;
+                    if phase_count == 0 {
+                        continue;
+                    }
+                    let workers = workers;
+                    let scales = &scales;
+
+                    handles.push(scope.spawn(
+                        move || -> Result<Vec<(usize, Vec<Vec<f32>>)>, String> {
+                            let mut phases = Vec::with_capacity(phase_count);
+                            for phase_idx in phase_start..(phase_start + phase_count) {
+                                let mut phase_weights: Vec<Vec<f32>> = TUPLE_PATTERNS
+                                    .iter()
+                                    .map(|pattern| {
+                                        vec![
+                                            0.0;
+                                            pow3(pattern.len()).expect("tuple size must fit usize")
+                                        ]
+                                    })
+                                    .collect();
+
+                                for ((network, games), scale) in workers.iter().zip(scales.iter()) {
+                                    if *games == 0 {
+                                        continue;
+                                    }
+                                    let source_phase = &network.weights[phase_idx];
+                                    for (target_weights, source_weights) in
+                                        phase_weights.iter_mut().zip(source_phase.iter())
+                                    {
+                                        for (target, source) in
+                                            target_weights.iter_mut().zip(source_weights.iter())
+                                        {
+                                            *target += source * *scale;
+                                        }
+                                    }
+                                }
+
+                                phases.push((phase_idx, phase_weights));
+                            }
+                            Ok(phases)
+                        },
+                    ));
+                }
+
+                let mut merged = Vec::with_capacity(PHASE_COUNT);
+                for handle in handles {
+                    let phases = handle
+                        .join()
+                        .map_err(|_| "parallel merge worker thread panicked".to_string())??;
+                    merged.extend(phases);
+                }
+                Ok(merged)
+            })?;
+
+        let mut merged = Self::new();
+        for (phase_idx, phase_weights) in merged_phases {
+            merged.weights[phase_idx] = phase_weights;
+        }
+        Ok(merged)
+    }
+
     fn phase_index(&self, board: &Board) -> usize {
         phase_index_for_board(board, self.phase_count)
     }
@@ -423,7 +507,7 @@ impl TrainableNTuple {
         } else {
             (white, black)
         };
-        let mut indices = [[0usize; TUPLE_COUNT]; SYMMETRY_COUNT];
+        let mut indices = [[0u16; TUPLE_COUNT]; SYMMETRY_COUNT];
 
         for symmetry in 0..SYMMETRY_COUNT {
             for tuple_idx in 0..TUPLE_COUNT {
@@ -433,7 +517,7 @@ impl TrainableNTuple {
                     compiled.len,
                     me,
                     opp,
-                );
+                ) as u16;
             }
         }
 
@@ -463,14 +547,13 @@ impl TrainableNTuple {
                 continue;
             }
 
-            let delta = new_state - old_state;
+            let delta = (new_state - old_state) as i32;
             for symmetry in 0..SYMMETRY_COUNT {
                 for occurrence in &POSITION_OCCURRENCES[symmetry][pos] {
                     let radix = COMPILED_TUPLES[occurrence.tuple_idx].radix_weights
-                        [occurrence.cell_idx] as isize;
+                        [occurrence.cell_idx] as i32;
                     indices[symmetry][occurrence.tuple_idx] =
-                        ((indices[symmetry][occurrence.tuple_idx] as isize) + delta * radix)
-                            as usize;
+                        ((indices[symmetry][occurrence.tuple_idx] as i32) + delta * radix) as u16;
                 }
             }
         }
@@ -478,34 +561,25 @@ impl TrainableNTuple {
         indices
     }
 
-    fn sum_feature_indices(
-        &self,
-        phase_idx: usize,
-        indices: &[[usize; TUPLE_COUNT]; SYMMETRY_COUNT],
-    ) -> f32 {
+    fn sum_feature_indices(&self, phase_idx: usize, indices: &FeatureIndices) -> f32 {
         let mut score = 0.0f32;
         let phase_weights = &self.weights[phase_idx];
 
         for tuple_indices in indices {
             for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
-                score += phase_weights[tuple_idx][index];
+                score += phase_weights[tuple_idx][index as usize];
             }
         }
 
         score * SYMMETRY_NORMALIZATION
     }
 
-    fn apply_delta(
-        &mut self,
-        phase_idx: usize,
-        indices: &[[usize; TUPLE_COUNT]; SYMMETRY_COUNT],
-        delta: f32,
-    ) {
+    fn apply_delta(&mut self, phase_idx: usize, indices: &FeatureIndices, delta: f32) {
         let normalized_delta = delta * SYMMETRY_NORMALIZATION;
         let phase_weights = &mut self.weights[phase_idx];
         for tuple_indices in indices {
             for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
-                phase_weights[tuple_idx][index] += normalized_delta;
+                phase_weights[tuple_idx][index as usize] += normalized_delta;
             }
         }
     }
@@ -1343,7 +1417,7 @@ fn train_network_parallel(
                 .map_err(|_| "training worker thread panicked".to_string())??;
             workers.push(worker);
         }
-        TrainableNTuple::merge_weighted(&workers, games)
+        TrainableNTuple::merge_weighted_parallel(&workers, games, threads)
     })
 }
 
@@ -1714,8 +1788,8 @@ mod tests {
         let phase1_indices = TrainableNTuple::compute_feature_indices(&phase1_board, true);
 
         for symmetry in 0..SYMMETRY_COUNT {
-            network.weights[0][0][phase0_indices[symmetry][0]] = 1.0;
-            network.weights[1][0][phase1_indices[symmetry][0]] = 2.0;
+            network.weights[0][0][phase0_indices[symmetry][0] as usize] = 1.0;
+            network.weights[1][0][phase1_indices[symmetry][0] as usize] = 2.0;
         }
 
         assert_eq!(network.evaluate(&phase0_board, true), 1.0);
@@ -1730,8 +1804,8 @@ mod tests {
 
         network.update(&board, true, 0.25);
 
-        assert_eq!(network.weights[0][0][indices[0][0]], 0.0);
-        assert!(network.weights[1][0][indices[0][0]] > 0.0);
+        assert_eq!(network.weights[0][0][indices[0][0] as usize], 0.0);
+        assert!(network.weights[1][0][indices[0][0] as usize] > 0.0);
     }
 
     #[test]
