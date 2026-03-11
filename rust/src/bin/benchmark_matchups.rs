@@ -18,6 +18,7 @@ const MIN_LEVEL: u8 = 1;
 const MAX_LEVEL: u8 = 6;
 const DEFAULT_WEIGHTS_TIMEOUT_MS: u64 = 250;
 const DEFAULT_OPPONENT_TIMEOUT_MS: u64 = 250;
+const DISABLED_TIMEOUT_SECS: u64 = 60 * 60 * 24 * 365;
 const POSITION_WEIGHTS: [i32; 64] = [
     120, -20, 20, 5, 5, 20, -20, 120, -20, -40, -5, -5, -5, -5, -40, -20, 20, -5, 15, 3, 3, 15, -5,
     20, 5, -5, 3, 3, 3, 3, -5, 5, 5, -5, 3, 3, 3, 3, -5, 5, 20, -5, 15, 3, 3, 15, -5, 20, -20, -40,
@@ -34,21 +35,14 @@ struct Config {
     weights_timeout_ms: u64,
     opponent_timeout_ms: u64,
     weights_path: Option<PathBuf>,
+    opponent_weights_path: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OpponentKind {
+#[derive(Clone, Copy, Debug)]
+enum Opponent<'a> {
     Random,
     PositionalSearch,
-}
-
-impl OpponentKind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Random => "random",
-            Self::PositionalSearch => "positional-search",
-        }
-    }
+    WeightsModel(&'a NTupleEvaluator),
 }
 
 #[derive(Default)]
@@ -67,6 +61,8 @@ struct MatchStats {
 fn main() -> Result<(), String> {
     let config = parse_args(env::args().skip(1).collect())?;
     let evaluator = load_evaluator(config.weights_path.as_ref())?;
+    let opponent_evaluator = load_optional_evaluator(config.opponent_weights_path.as_ref())?;
+    let primary_label = model_source_label(config.weights_path.as_ref());
 
     println!(
         "Benchmarking weights.bin AI: games_per_matchup={}, level={}, seed={}, random_opening_plies={}, weights_timeout_ms={}, opponent_timeout_ms={}",
@@ -82,21 +78,48 @@ fn main() -> Result<(), String> {
     } else {
         println!("Model source: embedded model in current binary");
     }
+    if let Some(path) = &config.opponent_weights_path {
+        println!("Opponent model source: {}", path.display());
+    }
     println!();
 
-    for (offset, opponent) in [OpponentKind::Random, OpponentKind::PositionalSearch]
-        .into_iter()
-        .enumerate()
-    {
+    if let Some(opponent_evaluator) = opponent_evaluator.as_ref() {
+        let opponent_label = model_source_label(config.opponent_weights_path.as_ref());
         let stats = benchmark_matchup(
             &evaluator,
-            opponent,
+            Opponent::WeightsModel(opponent_evaluator),
             &config,
-            config
-                .seed
-                .wrapping_add(GOLDEN_GAMMA.wrapping_mul((offset as u64) + 1)),
+            config.seed.wrapping_add(GOLDEN_GAMMA),
         )?;
-        print_stats(opponent, &stats);
+        print_stats(
+            &format!("{primary_label} vs {opponent_label}"),
+            "primary_model_move_ms",
+            "opponent_model_move_ms",
+            &stats,
+        );
+    } else {
+        for (offset, (opponent, label)) in [
+            (Opponent::Random, "random"),
+            (Opponent::PositionalSearch, "positional-search"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let stats = benchmark_matchup(
+                &evaluator,
+                opponent,
+                &config,
+                config
+                    .seed
+                    .wrapping_add(GOLDEN_GAMMA.wrapping_mul((offset as u64) + 1)),
+            )?;
+            print_stats(
+                &format!("{primary_label} vs {label}"),
+                "weights_move_ms",
+                "opponent_move_ms",
+                &stats,
+            );
+        }
     }
 
     Ok(())
@@ -111,6 +134,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
         weights_timeout_ms: DEFAULT_WEIGHTS_TIMEOUT_MS,
         opponent_timeout_ms: DEFAULT_OPPONENT_TIMEOUT_MS,
         weights_path: None,
+        opponent_weights_path: None,
     };
 
     let mut idx = 0usize;
@@ -146,6 +170,13 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
                     .get(idx)
                     .ok_or_else(|| "missing value for --weights-path".to_string())?;
                 config.weights_path = Some(PathBuf::from(raw));
+            }
+            "--opponent-weights-path" => {
+                idx += 1;
+                let raw = args
+                    .get(idx)
+                    .ok_or_else(|| "missing value for --opponent-weights-path".to_string())?;
+                config.opponent_weights_path = Some(PathBuf::from(raw));
             }
             "--help" | "-h" => {
                 print_usage();
@@ -188,6 +219,8 @@ fn print_usage() {
            --weights-timeout-ms <N>    Per-move timeout for weights.bin AI in milliseconds (default: 250)\n\
            --opponent-timeout-ms <N>   Per-move timeout for positional-search opponent; 0 disables the limit (default: 250)\n\
            --weights-path <PATH>       Optional external weights.bin to benchmark instead of embedded model\n\
+           --opponent-weights-path <PATH>\n\
+                                      Optional external weights.bin for direct model-vs-model benchmark\n\
            --help                      Show this message"
     );
 }
@@ -202,9 +235,23 @@ fn load_evaluator(weights_path: Option<&PathBuf>) -> Result<NTupleEvaluator, Str
     }
 }
 
+fn load_optional_evaluator(
+    weights_path: Option<&PathBuf>,
+) -> Result<Option<NTupleEvaluator>, String> {
+    weights_path
+        .map(|path| load_evaluator(Some(path)))
+        .transpose()
+}
+
+fn model_source_label(weights_path: Option<&PathBuf>) -> String {
+    weights_path
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "embedded model".to_string())
+}
+
 fn benchmark_matchup(
     evaluator: &NTupleEvaluator,
-    opponent: OpponentKind,
+    opponent: Opponent<'_>,
     config: &Config,
     seed: u64,
 ) -> Result<MatchStats, String> {
@@ -254,7 +301,7 @@ struct GameOutcome {
 
 fn play_game(
     evaluator: &NTupleEvaluator,
-    opponent: OpponentKind,
+    opponent: Opponent<'_>,
     level: u8,
     random_opening_plies: usize,
     weights_timeout_ms: u64,
@@ -296,19 +343,24 @@ fn play_game(
         let weights_turn = current_is_black == weights_is_black;
         let started = Instant::now();
         let mv = if weights_turn {
-            let mut searcher = Searcher::with_timeout(
-                evaluator,
-                level,
-                WebDuration::from_millis(weights_timeout_ms),
-            );
+            let mut searcher =
+                Searcher::with_timeout(evaluator, level, model_timeout(weights_timeout_ms));
             searcher.search(&board, current_is_black)
         } else {
             match opponent {
-                OpponentKind::Random => random_move(legal, rng)
+                Opponent::Random => random_move(legal, rng)
                     .ok_or_else(|| "random opponent failed to choose move".to_string())?,
-                OpponentKind::PositionalSearch => {
+                Opponent::PositionalSearch => {
                     choose_positional_move(&board, current_is_black, level, opponent_timeout_ms)
                         .ok_or_else(|| "positional opponent failed to choose move".to_string())?
+                }
+                Opponent::WeightsModel(opponent_evaluator) => {
+                    let mut searcher = Searcher::with_timeout(
+                        opponent_evaluator,
+                        level,
+                        model_timeout(opponent_timeout_ms),
+                    );
+                    searcher.search(&board, current_is_black)
                 }
             }
         };
@@ -601,8 +653,13 @@ fn transform_pos(pos: u8, symmetry: u8) -> usize {
     nr * 8 + nc
 }
 
-fn print_stats(opponent: OpponentKind, stats: &MatchStats) {
-    println!("weights.bin AI vs {}", opponent.label());
+fn print_stats(
+    label: &str,
+    primary_move_label: &str,
+    opponent_move_label: &str,
+    stats: &MatchStats,
+) {
+    println!("{label}");
     println!(
         "  games={} (black={}, white={})",
         stats.games, stats.weights_black_games, stats.weights_white_games
@@ -624,18 +681,26 @@ fn print_stats(opponent: OpponentKind, stats: &MatchStats) {
         max_value(&stats.final_diffs)
     );
     println!(
-        "  weights_move_ms(avg/p95/max) = {:.2} / {:.2} / {:.2}",
+        "  {primary_move_label}(avg/p95/max) = {:.2} / {:.2} / {:.2}",
         mean(&stats.weights_move_ms),
         percentile(&stats.weights_move_ms, 95),
         max_value(&stats.weights_move_ms)
     );
     println!(
-        "  opponent_move_ms(avg/p95/max) = {:.2} / {:.2} / {:.2}",
+        "  {opponent_move_label}(avg/p95/max) = {:.2} / {:.2} / {:.2}",
         mean(&stats.opponent_move_ms),
         percentile(&stats.opponent_move_ms, 95),
         max_value(&stats.opponent_move_ms)
     );
     println!();
+}
+
+fn model_timeout(timeout_ms: u64) -> WebDuration {
+    if timeout_ms == 0 {
+        WebDuration::from_secs(DISABLED_TIMEOUT_SECS)
+    } else {
+        WebDuration::from_millis(timeout_ms)
+    }
 }
 
 fn percentage(numerator: usize, denominator: usize) -> f64 {
@@ -683,4 +748,46 @@ fn max_value(samples: &[f64]) -> f64 {
         .copied()
         .max_by(f64::total_cmp)
         .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args;
+
+    #[test]
+    fn parse_args_supports_direct_model_matchup() {
+        let config = parse_args(vec![
+            "--games".to_string(),
+            "40".to_string(),
+            "--weights-path".to_string(),
+            "models/current.bin".to_string(),
+            "--opponent-weights-path".to_string(),
+            "models/challenger.bin".to_string(),
+        ])
+        .expect("args should parse");
+
+        assert_eq!(config.games_per_matchup, 40);
+        assert_eq!(
+            config
+                .weights_path
+                .as_deref()
+                .and_then(|path| path.to_str()),
+            Some("models/current.bin")
+        );
+        assert_eq!(
+            config
+                .opponent_weights_path
+                .as_deref()
+                .and_then(|path| path.to_str()),
+            Some("models/challenger.bin")
+        );
+    }
+
+    #[test]
+    fn parse_args_rejects_missing_opponent_weights_path_value() {
+        let err = parse_args(vec!["--opponent-weights-path".to_string()])
+            .expect_err("missing value should fail");
+
+        assert!(err.contains("missing value for --opponent-weights-path"));
+    }
 }
