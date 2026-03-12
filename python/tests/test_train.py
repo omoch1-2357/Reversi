@@ -27,6 +27,10 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
             "123",
             "--alpha",
             "0.02",
+            "--alpha-decay",
+            "inverse_game",
+            "--alpha-decay-start-game",
+            "12",
             "--lambda",
             "0.8",
             "--epsilon",
@@ -55,6 +59,8 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
 
     assert args.games == 123
     assert args.alpha == pytest.approx(0.02)
+    assert args.alpha_decay == "inverse_game"
+    assert args.alpha_decay_start_game == 12
     assert args.lambda_ == pytest.approx(0.8)
     assert args.epsilon == pytest.approx(0.05)
     assert str(args.output) == "out.bin"
@@ -131,6 +137,8 @@ def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "threads=0" in captured.out
+        assert "alpha_decay=none" in captured.out
+        assert "alpha_decay_start_game=0" in captured.out
         assert "progress_interval=2" in captured.out
         assert "random_opening_plies=0" in captured.out
         assert "checkpoint_interval=0" in captured.out
@@ -150,6 +158,8 @@ def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
 def test_parser_defaults_threads_to_zero() -> None:
     args = build_parser().parse_args([])
     assert args.threads == 0
+    assert args.alpha_decay == "none"
+    assert args.alpha_decay_start_game == 0
     assert args.status_file is None
     assert args.verify is True
 
@@ -171,6 +181,8 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         seed=42,
         threads=1,
         random_opening_plies=0,
+        alpha_decay="none",
+        alpha_decay_start_game=0,
         progress_interval=0,
         checkpoint_interval=0,
         checkpoint_dir=None,
@@ -199,6 +211,8 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
             seed=42,
             threads=2,
             random_opening_plies=4,
+            alpha_decay="inverse_game",
+            alpha_decay_start_game=9,
             progress_interval=10,
             checkpoint_interval=2,
             checkpoint_dir=checkpoint_dir,
@@ -211,6 +225,8 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         assert [call["games"] for call in calls] == [2, 2, 1]
         assert calls[0]["initial_model"] == resume_bytes
         assert all(call["random_opening_plies"] == 4 for call in calls)
+        assert all(call["alpha_decay"] == "inverse_game" for call in calls)
+        assert [call["alpha_decay_start_game"] for call in calls] == [9, 11, 13]
         checkpoints = sorted(checkpoint_dir.glob("*.bin"))
         assert len(checkpoints) == 3
         assert output.exists()

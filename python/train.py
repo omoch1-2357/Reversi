@@ -25,6 +25,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--alpha", type=float, default=0.001, help="Learning rate.")
     parser.add_argument(
+        "--alpha-decay",
+        type=str,
+        choices=("none", "inverse_game"),
+        default="none",
+        help="Learning-rate decay schedule.",
+    )
+    parser.add_argument(
+        "--alpha-decay-start-game",
+        type=int,
+        default=0,
+        help="Games already trained before this run when using alpha decay.",
+    )
+    parser.add_argument(
         "--lambda",
         type=float,
         default=0.7,
@@ -121,6 +134,8 @@ def write_status_file(
     progress_interval: int,
     checkpoint_interval: int,
     random_opening_plies: int,
+    alpha_decay: str,
+    alpha_decay_start_game: int,
     resume_from: Path | None,
     last_checkpoint: Path | None = None,
     error: str | None = None,
@@ -148,6 +163,8 @@ def write_status_file(
         "progress_interval": progress_interval,
         "checkpoint_interval": checkpoint_interval,
         "random_opening_plies": random_opening_plies,
+        "alpha_decay": alpha_decay,
+        "alpha_decay_start_game": alpha_decay_start_game,
         "resume_from": str(resume_from) if resume_from is not None else None,
         "last_checkpoint": str(last_checkpoint)
         if last_checkpoint is not None
@@ -260,6 +277,8 @@ def train_and_export(
     seed: int,
     threads: int,
     random_opening_plies: int,
+    alpha_decay: str,
+    alpha_decay_start_game: int,
     progress_interval: int,
     checkpoint_interval: int,
     checkpoint_dir: Path | None,
@@ -275,6 +294,10 @@ def train_and_export(
     if random_opening_plies < 0:
         raise ValueError(
             f"random_opening_plies must be >= 0, got {random_opening_plies}"
+        )
+    if alpha_decay_start_game < 0:
+        raise ValueError(
+            f"alpha_decay_start_game must be >= 0, got {alpha_decay_start_game}"
         )
     if progress_interval < 0:
         raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")
@@ -305,6 +328,8 @@ def train_and_export(
             progress_interval=progress_interval,
             checkpoint_interval=checkpoint_interval,
             random_opening_plies=random_opening_plies,
+            alpha_decay=alpha_decay,
+            alpha_decay_start_game=alpha_decay_start_game,
             resume_from=resume_from,
             last_checkpoint=last_checkpoint_path,
             error=error,
@@ -333,6 +358,8 @@ def train_and_export(
             random_opening_plies=random_opening_plies,
             progress_interval=progress_interval,
             progress_callback=on_progress,
+            alpha_decay=alpha_decay,
+            alpha_decay_start_game=alpha_decay_start_game,
         )
         output_path.write_bytes(model_bytes)
         if verify:
@@ -370,6 +397,8 @@ def train_and_export(
             if progress_interval > 0
             else 0,
             progress_callback=on_progress,
+            alpha_decay=alpha_decay,
+            alpha_decay_start_game=alpha_decay_start_game + completed_games,
         )
         completed_games += chunk_games
 
@@ -397,7 +426,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         print(
             "Training with "
-            f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
+            f"games={args.games}, alpha={args.alpha}, alpha_decay={args.alpha_decay}, "
+            f"alpha_decay_start_game={args.alpha_decay_start_game}, "
+            f"lambda={args.lambda_}, "
             f"epsilon={args.epsilon}, seed={args.seed}, threads={args.threads}, "
             f"progress_interval={args.progress_interval}, "
             f"random_opening_plies={args.random_opening_plies}, "
@@ -415,6 +446,8 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             threads=args.threads,
             random_opening_plies=args.random_opening_plies,
+            alpha_decay=args.alpha_decay,
+            alpha_decay_start_game=args.alpha_decay_start_game,
             progress_interval=args.progress_interval,
             checkpoint_interval=args.checkpoint_interval,
             checkpoint_dir=args.checkpoint_dir,
@@ -440,6 +473,8 @@ def main(argv: list[str] | None = None) -> int:
             progress_interval=args.progress_interval,
             checkpoint_interval=args.checkpoint_interval,
             random_opening_plies=args.random_opening_plies,
+            alpha_decay=args.alpha_decay,
+            alpha_decay_start_game=args.alpha_decay_start_game,
             resume_from=args.resume_from,
             error=str(exc),
         )

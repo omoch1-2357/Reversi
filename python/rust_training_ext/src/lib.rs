@@ -4,6 +4,8 @@ use pyo3::prelude::*;
 #[pyfunction(signature = (
     games,
     alpha = 0.001,
+    alpha_decay = "none",
+    alpha_decay_start_game = 0,
     lambda_ = 0.7,
     epsilon = 0.1,
     seed = 42,
@@ -17,6 +19,8 @@ fn train_to_bytes(
     py: Python<'_>,
     games: usize,
     alpha: f32,
+    alpha_decay: &str,
+    alpha_decay_start_game: usize,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
@@ -26,6 +30,8 @@ fn train_to_bytes(
     progress_interval: usize,
     progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<Vec<u8>> {
+    let alpha_decay = reversi::training::AlphaDecayStrategy::from_name(alpha_decay)
+        .map_err(PyRuntimeError::new_err)?;
     let mut callback_error: Option<PyErr> = None;
     let mut progress = |completed: usize, total: usize, elapsed: f64| -> Result<(), String> {
         if let Some(callback) = progress_callback.as_ref() {
@@ -43,9 +49,11 @@ fn train_to_bytes(
 
     let result = py.allow_threads(|| {
         if progress_callback.is_some() {
-            reversi::training::train_to_bytes(
+            reversi::training::train_to_bytes_with_alpha_decay(
                 games,
                 alpha,
+                alpha_decay,
+                alpha_decay_start_game,
                 lambda_,
                 epsilon,
                 seed,
@@ -56,9 +64,11 @@ fn train_to_bytes(
                 Some(&mut progress),
             )
         } else {
-            reversi::training::train_to_bytes(
+            reversi::training::train_to_bytes_with_alpha_decay(
                 games,
                 alpha,
+                alpha_decay,
+                alpha_decay_start_game,
                 lambda_,
                 epsilon,
                 seed,
@@ -86,6 +96,8 @@ fn train_to_bytes(
 #[pyfunction(signature = (
     games,
     alpha = 0.001,
+    alpha_decay = "none",
+    alpha_decay_start_game = 0,
     lambda_ = 0.7,
     epsilon = 0.1,
     seed = 42,
@@ -99,6 +111,8 @@ fn train_to_uncompressed_bytes(
     py: Python<'_>,
     games: usize,
     alpha: f32,
+    alpha_decay: &str,
+    alpha_decay_start_game: usize,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
@@ -108,6 +122,8 @@ fn train_to_uncompressed_bytes(
     progress_interval: usize,
     progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<Vec<u8>> {
+    let alpha_decay = reversi::training::AlphaDecayStrategy::from_name(alpha_decay)
+        .map_err(PyRuntimeError::new_err)?;
     let mut callback_error: Option<PyErr> = None;
     let mut progress = |completed: usize, total: usize, elapsed: f64| -> Result<(), String> {
         if let Some(callback) = progress_callback.as_ref() {
@@ -125,9 +141,11 @@ fn train_to_uncompressed_bytes(
 
     let result = py.allow_threads(|| {
         if progress_callback.is_some() {
-            reversi::training::train_to_uncompressed_bytes(
+            reversi::training::train_to_uncompressed_bytes_with_alpha_decay(
                 games,
                 alpha,
+                alpha_decay,
+                alpha_decay_start_game,
                 lambda_,
                 epsilon,
                 seed,
@@ -138,9 +156,11 @@ fn train_to_uncompressed_bytes(
                 Some(&mut progress),
             )
         } else {
-            reversi::training::train_to_uncompressed_bytes(
+            reversi::training::train_to_uncompressed_bytes_with_alpha_decay(
                 games,
                 alpha,
+                alpha_decay,
+                alpha_decay_start_game,
                 lambda_,
                 epsilon,
                 seed,

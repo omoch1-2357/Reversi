@@ -80,6 +80,8 @@ def train_to_bytes(
     random_opening_plies: int,
     progress_interval: int,
     progress_callback: ProgressCallback | None = None,
+    alpha_decay: str = "none",
+    alpha_decay_start_game: int = 0,
 ) -> bytes:
     module = _load_extension()
     kwargs = dict(
@@ -96,6 +98,10 @@ def train_to_bytes(
         kwargs["initial_model"] = bytes(initial_model)
     if random_opening_plies != 0:
         kwargs["random_opening_plies"] = random_opening_plies
+    if alpha_decay != "none":
+        kwargs["alpha_decay"] = alpha_decay
+    if alpha_decay_start_game != 0:
+        kwargs["alpha_decay_start_game"] = alpha_decay_start_game
     try:
         return bytes(module.train_to_bytes(**kwargs))
     except TypeError as exc:
@@ -122,6 +128,8 @@ def train_to_uncompressed_bytes(
     random_opening_plies: int,
     progress_interval: int,
     progress_callback: ProgressCallback | None = None,
+    alpha_decay: str = "none",
+    alpha_decay_start_game: int = 0,
 ) -> bytes:
     module = _load_extension()
     kwargs = dict(
@@ -138,6 +146,10 @@ def train_to_uncompressed_bytes(
         kwargs["initial_model"] = bytes(initial_model)
     if random_opening_plies != 0:
         kwargs["random_opening_plies"] = random_opening_plies
+    if alpha_decay != "none":
+        kwargs["alpha_decay"] = alpha_decay
+    if alpha_decay_start_game != 0:
+        kwargs["alpha_decay_start_game"] = alpha_decay_start_game
     try:
         return bytes(module.train_to_uncompressed_bytes(**kwargs))
     except TypeError as exc:

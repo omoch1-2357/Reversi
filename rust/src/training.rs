@@ -68,6 +68,39 @@ struct PositionOccurrence {
     cell_idx: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaDecayStrategy {
+    None,
+    InverseGame,
+}
+
+impl AlphaDecayStrategy {
+    pub fn from_name(name: &str) -> Result<Self, String> {
+        match name {
+            "none" => Ok(Self::None),
+            "inverse_game" => Ok(Self::InverseGame),
+            _ => Err(format!(
+                "unsupported alpha_decay '{name}' (expected one of: none, inverse_game)"
+            )),
+        }
+    }
+
+    fn alpha_for_completed_games(
+        self,
+        base_alpha: f32,
+        completed_games: usize,
+        start_game: usize,
+    ) -> f32 {
+        match self {
+            Self::None => base_alpha,
+            Self::InverseGame => {
+                let denominator = (start_game + completed_games + 1) as f32;
+                base_alpha / denominator
+            }
+        }
+    }
+}
+
 static COMPILED_TUPLES: LazyLock<[CompiledTuple; TUPLE_COUNT]> = LazyLock::new(|| {
     std::array::from_fn(|tuple_idx| {
         let pattern = TUPLE_PATTERNS[tuple_idx];
@@ -730,7 +763,10 @@ impl TrainingNetwork for TrainableNTuple {
 
 pub struct TDLambdaTrainer<N> {
     network: N,
-    alpha: f32,
+    base_alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
+    completed_games: usize,
     lambda_: f32,
     epsilon: f64,
     random_opening_plies: usize,
@@ -752,6 +788,28 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         seed: u64,
         random_opening_plies: usize,
     ) -> Result<Self, String> {
+        Self::new_with_alpha_decay(
+            network,
+            alpha,
+            AlphaDecayStrategy::None,
+            0,
+            lambda_,
+            epsilon,
+            seed,
+            random_opening_plies,
+        )
+    }
+
+    pub fn new_with_alpha_decay(
+        network: N,
+        alpha: f32,
+        alpha_decay: AlphaDecayStrategy,
+        alpha_decay_start_game: usize,
+        lambda_: f32,
+        epsilon: f64,
+        seed: u64,
+        random_opening_plies: usize,
+    ) -> Result<Self, String> {
         if alpha < 0.0 {
             return Err(format!("alpha must be >= 0.0, got {alpha}"));
         }
@@ -764,7 +822,10 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
 
         Ok(Self {
             network,
-            alpha,
+            base_alpha: alpha,
+            alpha_decay,
+            alpha_decay_start_game,
+            completed_games: 0,
             lambda_,
             epsilon,
             random_opening_plies,
@@ -781,6 +842,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         let start_time = Instant::now();
         for game_idx in 1..=num_games {
             self.play_one_game()?;
+            self.completed_games = self.completed_games.saturating_add(1);
             if let Some(callback) = progress_callback.as_mut() {
                 if progress_interval > 0 && game_idx % progress_interval == 0 {
                     callback(game_idx, num_games, start_time.elapsed().as_secs_f64())?;
@@ -799,6 +861,14 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
 
     pub fn into_network(self) -> N {
         self.network
+    }
+
+    fn current_alpha(&self) -> f32 {
+        self.alpha_decay.alpha_for_completed_games(
+            self.base_alpha,
+            self.completed_games,
+            self.alpha_decay_start_game,
+        )
     }
 
     fn play_one_game(&mut self) -> Result<(), String> {
@@ -1169,7 +1239,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
                 next_value,
                 cumulative_td,
                 next_player,
-                self.alpha,
+                self.current_alpha(),
                 self.lambda_,
             );
             cumulative_td = ensure_finite(next_cumulative_td, "td-lambda cumulative_td")?;
@@ -1259,9 +1329,41 @@ pub fn train_to_bytes(
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<Vec<u8>, String> {
+    train_to_bytes_with_alpha_decay(
+        games,
+        alpha,
+        AlphaDecayStrategy::None,
+        0,
+        lambda_,
+        epsilon,
+        seed,
+        threads,
+        initial_model,
+        random_opening_plies,
+        progress_interval,
+        progress_callback,
+    )
+}
+
+pub fn train_to_bytes_with_alpha_decay(
+    games: usize,
+    alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    threads: usize,
+    initial_model: Option<&[u8]>,
+    random_opening_plies: usize,
+    progress_interval: usize,
+    progress_callback: Option<ProgressCallback<'_>>,
+) -> Result<Vec<u8>, String> {
     let network = train_network(
         games,
         alpha,
+        alpha_decay,
+        alpha_decay_start_game,
         lambda_,
         epsilon,
         seed,
@@ -1286,9 +1388,41 @@ pub fn train_to_uncompressed_bytes(
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<Vec<u8>, String> {
+    train_to_uncompressed_bytes_with_alpha_decay(
+        games,
+        alpha,
+        AlphaDecayStrategy::None,
+        0,
+        lambda_,
+        epsilon,
+        seed,
+        threads,
+        initial_model,
+        random_opening_plies,
+        progress_interval,
+        progress_callback,
+    )
+}
+
+pub fn train_to_uncompressed_bytes_with_alpha_decay(
+    games: usize,
+    alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
+    lambda_: f32,
+    epsilon: f64,
+    seed: u64,
+    threads: usize,
+    initial_model: Option<&[u8]>,
+    random_opening_plies: usize,
+    progress_interval: usize,
+    progress_callback: Option<ProgressCallback<'_>>,
+) -> Result<Vec<u8>, String> {
     let network = train_network(
         games,
         alpha,
+        alpha_decay,
+        alpha_decay_start_game,
         lambda_,
         epsilon,
         seed,
@@ -1304,6 +1438,8 @@ pub fn train_to_uncompressed_bytes(
 fn train_network(
     games: usize,
     alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
@@ -1326,6 +1462,8 @@ fn train_network(
             base_network,
             games,
             alpha,
+            alpha_decay,
+            alpha_decay_start_game,
             lambda_,
             epsilon,
             seed,
@@ -1339,6 +1477,8 @@ fn train_network(
         base_network,
         games,
         alpha,
+        alpha_decay,
+        alpha_decay_start_game,
         lambda_,
         epsilon,
         seed,
@@ -1353,6 +1493,8 @@ fn train_network_sequential(
     network: TrainableNTuple,
     games: usize,
     alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
@@ -1360,8 +1502,16 @@ fn train_network_sequential(
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<TrainableNTuple, String> {
-    let mut trainer =
-        TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed, random_opening_plies)?;
+    let mut trainer = TDLambdaTrainer::new_with_alpha_decay(
+        network,
+        alpha,
+        alpha_decay,
+        alpha_decay_start_game,
+        lambda_,
+        epsilon,
+        seed,
+        random_opening_plies,
+    )?;
     trainer.train(games, progress_interval, progress_callback)?;
     Ok(trainer.into_network())
 }
@@ -1370,6 +1520,8 @@ fn train_network_parallel(
     base_network: TrainableNTuple,
     games: usize,
     alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
@@ -1389,15 +1541,20 @@ fn train_network_parallel(
 
     std::thread::scope(|scope| -> Result<TrainableNTuple, String> {
         let mut handles = Vec::with_capacity(worker_game_counts.len());
+        let mut worker_start_game = alpha_decay_start_game;
         for (worker_idx, worker_games) in worker_game_counts.iter().copied().enumerate() {
             let worker_tx = tx.clone();
             let worker_network = base_network.clone();
+            let current_worker_start_game = worker_start_game;
+            worker_start_game = worker_start_game.saturating_add(worker_games);
             handles.push(
                 scope.spawn(move || -> Result<(TrainableNTuple, usize), String> {
                     let result = train_worker_network(
                         worker_network,
                         worker_games,
                         alpha,
+                        alpha_decay,
+                        current_worker_start_game,
                         lambda_,
                         epsilon,
                         worker_seed(seed, worker_idx),
@@ -1457,6 +1614,8 @@ fn train_worker_network(
     network: TrainableNTuple,
     games: usize,
     alpha: f32,
+    alpha_decay: AlphaDecayStrategy,
+    alpha_decay_start_game: usize,
     lambda_: f32,
     epsilon: f64,
     seed: u64,
@@ -1464,8 +1623,16 @@ fn train_worker_network(
     progress_interval: usize,
     progress_tx: mpsc::Sender<WorkerMessage>,
 ) -> Result<TrainableNTuple, String> {
-    let mut trainer =
-        TDLambdaTrainer::new(network, alpha, lambda_, epsilon, seed, random_opening_plies)?;
+    let mut trainer = TDLambdaTrainer::new_with_alpha_decay(
+        network,
+        alpha,
+        alpha_decay,
+        alpha_decay_start_game,
+        lambda_,
+        epsilon,
+        seed,
+        random_opening_plies,
+    )?;
 
     if progress_interval > 0 {
         let mut reported = 0usize;
@@ -1977,6 +2144,39 @@ mod tests {
     fn resolve_thread_count_zero_uses_available_parallelism() {
         assert!(resolve_thread_count(0) >= 1);
         assert_eq!(resolve_thread_count(3), 3);
+    }
+
+    #[test]
+    fn alpha_decay_strategy_parses_supported_names() {
+        assert_eq!(
+            AlphaDecayStrategy::from_name("none").unwrap(),
+            AlphaDecayStrategy::None
+        );
+        assert_eq!(
+            AlphaDecayStrategy::from_name("inverse_game").unwrap(),
+            AlphaDecayStrategy::InverseGame
+        );
+        assert!(AlphaDecayStrategy::from_name("linear").is_err());
+    }
+
+    #[test]
+    fn inverse_game_alpha_decay_uses_completed_games_and_offset() {
+        assert_eq!(
+            AlphaDecayStrategy::None.alpha_for_completed_games(0.5, 10, 20),
+            0.5
+        );
+        assert_eq!(
+            AlphaDecayStrategy::InverseGame.alpha_for_completed_games(0.5, 0, 0),
+            0.5
+        );
+        assert_eq!(
+            AlphaDecayStrategy::InverseGame.alpha_for_completed_games(0.5, 1, 0),
+            0.25
+        );
+        assert_eq!(
+            AlphaDecayStrategy::InverseGame.alpha_for_completed_games(0.5, 0, 4),
+            0.1
+        );
     }
 
     #[test]
