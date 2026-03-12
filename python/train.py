@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--alpha-decay",
         type=str,
-        choices=("none", "inverse_game"),
+        choices=("none", "inverse_game", "inverse_visit"),
         default="none",
         help="Learning-rate decay schedule.",
     )
@@ -298,6 +298,16 @@ def train_and_export(
     if alpha_decay_start_game < 0:
         raise ValueError(
             f"alpha_decay_start_game must be >= 0, got {alpha_decay_start_game}"
+        )
+    if alpha_decay == "inverse_visit" and checkpoint_interval > 0:
+        raise ValueError(
+            "inverse_visit alpha decay cannot be used with checkpoint_interval > 0 "
+            "because visit counts are not serialized"
+        )
+    if alpha_decay == "inverse_visit" and resume_from is not None:
+        raise ValueError(
+            "inverse_visit alpha decay cannot resume from an existing model "
+            "because visit counts are not serialized"
         )
     if progress_interval < 0:
         raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")

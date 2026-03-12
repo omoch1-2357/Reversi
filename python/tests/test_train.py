@@ -28,7 +28,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
             "--alpha",
             "0.02",
             "--alpha-decay",
-            "inverse_game",
+            "inverse_visit",
             "--alpha-decay-start-game",
             "12",
             "--lambda",
@@ -59,7 +59,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
 
     assert args.games == 123
     assert args.alpha == pytest.approx(0.02)
-    assert args.alpha_decay == "inverse_game"
+    assert args.alpha_decay == "inverse_visit"
     assert args.alpha_decay_start_game == 12
     assert args.lambda_ == pytest.approx(0.8)
     assert args.epsilon == pytest.approx(0.05)
@@ -236,6 +236,33 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         for path in checkpoint_dir.glob("*"):
             path.unlink()
         checkpoint_dir.rmdir()
+
+
+def test_train_and_export_rejects_inverse_visit_with_checkpoints() -> None:
+    output = _output_path("_generated_inverse_visit_checkpoint_weights.bin")
+
+    try:
+        with pytest.raises(ValueError, match="visit counts are not serialized"):
+            train_and_export(
+                games=5,
+                alpha=0.01,
+                lambda_=0.7,
+                epsilon=0.1,
+                output=output,
+                seed=42,
+                threads=1,
+                random_opening_plies=0,
+                alpha_decay="inverse_visit",
+                alpha_decay_start_game=0,
+                progress_interval=0,
+                checkpoint_interval=1,
+                checkpoint_dir=None,
+                resume_from=None,
+                status_file=None,
+                verify=True,
+            )
+    finally:
+        output.unlink(missing_ok=True)
 
 
 def test_main_writes_failed_status_file(monkeypatch) -> None:

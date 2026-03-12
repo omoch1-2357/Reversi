@@ -72,7 +72,7 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     payload = rust_training.train_to_bytes(
         games=3,
         alpha=0.2,
-        alpha_decay="inverse_game",
+        alpha_decay="inverse_visit",
         alpha_decay_start_game=7,
         lambda_=0.8,
         epsilon=0.05,
@@ -87,7 +87,7 @@ def test_train_to_bytes_delegates_to_extension(monkeypatch) -> None:
     assert payload == b"model-bytes"
     assert captured["games"] == 3
     assert captured["alpha"] == pytest.approx(0.2)
-    assert captured["alpha_decay"] == "inverse_game"
+    assert captured["alpha_decay"] == "inverse_visit"
     assert captured["alpha_decay_start_game"] == 7
     assert captured["lambda_"] == pytest.approx(0.8)
     assert captured["epsilon"] == pytest.approx(0.05)
@@ -119,7 +119,7 @@ def test_train_to_uncompressed_bytes_delegates_to_extension(monkeypatch) -> None
     payload = rust_training.train_to_uncompressed_bytes(
         games=4,
         alpha=0.2,
-        alpha_decay="inverse_game",
+        alpha_decay="inverse_visit",
         alpha_decay_start_game=11,
         lambda_=0.8,
         epsilon=0.05,
@@ -132,7 +132,7 @@ def test_train_to_uncompressed_bytes_delegates_to_extension(monkeypatch) -> None
 
     assert payload == b"raw-model-bytes"
     assert captured["games"] == 4
-    assert captured["alpha_decay"] == "inverse_game"
+    assert captured["alpha_decay"] == "inverse_visit"
     assert captured["alpha_decay_start_game"] == 11
     assert captured["threads"] == 0
     assert captured["initial_model"] == b"checkpoint-bytes"

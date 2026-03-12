@@ -72,6 +72,7 @@ struct PositionOccurrence {
 pub enum AlphaDecayStrategy {
     None,
     InverseGame,
+    InverseVisit,
 }
 
 impl AlphaDecayStrategy {
@@ -79,8 +80,9 @@ impl AlphaDecayStrategy {
         match name {
             "none" => Ok(Self::None),
             "inverse_game" => Ok(Self::InverseGame),
+            "inverse_visit" => Ok(Self::InverseVisit),
             _ => Err(format!(
-                "unsupported alpha_decay '{name}' (expected one of: none, inverse_game)"
+                "unsupported alpha_decay '{name}' (expected one of: none, inverse_game, inverse_visit)"
             )),
         }
     }
@@ -92,12 +94,16 @@ impl AlphaDecayStrategy {
         start_game: usize,
     ) -> f32 {
         match self {
-            Self::None => base_alpha,
+            Self::None | Self::InverseVisit => base_alpha,
             Self::InverseGame => {
                 let denominator = (start_game + completed_games + 1) as f32;
                 base_alpha / denominator
             }
         }
+    }
+
+    fn requires_visit_counts(self) -> bool {
+        matches!(self, Self::InverseVisit)
     }
 }
 
@@ -150,6 +156,16 @@ static POSITION_OCCURRENCES: LazyLock<[[Vec<PositionOccurrence>; 64]; SYMMETRY_C
 pub trait TrainingNetwork {
     fn evaluate(&self, board: &Board, is_black: bool) -> f32;
     fn update(&mut self, board: &Board, is_black: bool, delta: f32);
+    fn prepare_for_alpha_decay(&mut self, alpha_decay: AlphaDecayStrategy) -> Result<(), String> {
+        if alpha_decay.requires_visit_counts() {
+            Err(
+                "inverse_visit alpha decay is only supported for the trainable N-tuple network"
+                    .to_string(),
+            )
+        } else {
+            Ok(())
+        }
+    }
     fn evaluate_precomputed(
         &self,
         board: &Board,
@@ -169,6 +185,7 @@ pub trait TrainingNetwork {
         cumulative_td: f32,
         next_player: Option<bool>,
         alpha: f32,
+        alpha_decay: AlphaDecayStrategy,
         lambda_: f32,
     ) -> (f32, f32) {
         self.td_lambda_step(
@@ -178,6 +195,7 @@ pub trait TrainingNetwork {
             cumulative_td,
             next_player,
             alpha,
+            alpha_decay,
             lambda_,
         )
     }
@@ -190,6 +208,7 @@ pub trait TrainingNetwork {
         cumulative_td: f32,
         next_player: Option<bool>,
         alpha: f32,
+        _alpha_decay: AlphaDecayStrategy,
         lambda_: f32,
     ) -> (f32, f32) {
         let current_value = self.evaluate(board, is_black);
@@ -214,6 +233,7 @@ pub trait TrainingNetwork {
 pub struct TrainableNTuple {
     phase_count: usize,
     weights: Vec<Vec<Vec<f32>>>,
+    visit_counts: Option<Vec<Vec<Vec<u32>>>>,
 }
 
 impl TrainableNTuple {
@@ -225,6 +245,7 @@ impl TrainableNTuple {
         Self {
             phase_count: PHASE_COUNT,
             weights: vec![template; PHASE_COUNT],
+            visit_counts: None,
         }
     }
 
@@ -535,7 +556,22 @@ impl TrainableNTuple {
         Ok(Self {
             phase_count,
             weights,
+            visit_counts: None,
         })
+    }
+
+    fn zero_visit_counts() -> Vec<Vec<Vec<u32>>> {
+        let template = TUPLE_PATTERNS
+            .iter()
+            .map(|pattern| vec![0u32; pow3(pattern.len()).expect("tuple size must fit usize")])
+            .collect::<Vec<_>>();
+        vec![template; PHASE_COUNT]
+    }
+
+    fn ensure_visit_counts(&mut self) {
+        if self.visit_counts.is_none() {
+            self.visit_counts = Some(Self::zero_visit_counts());
+        }
     }
 
     fn compute_feature_indices(board: &Board, is_black: bool) -> FeatureIndices {
@@ -622,6 +658,40 @@ impl TrainableNTuple {
         }
     }
 
+    fn apply_delta_with_alpha_decay(
+        &mut self,
+        phase_idx: usize,
+        indices: &FeatureIndices,
+        alpha: f32,
+        cumulative_td: f32,
+        alpha_decay: AlphaDecayStrategy,
+    ) {
+        if !alpha_decay.requires_visit_counts() {
+            self.apply_delta(
+                phase_idx,
+                indices,
+                clip_weight_update(alpha * cumulative_td),
+            );
+            return;
+        }
+
+        self.ensure_visit_counts();
+        let phase_weights = &mut self.weights[phase_idx];
+        let phase_counts = &mut self
+            .visit_counts
+            .as_mut()
+            .expect("visit counts must be initialized")[phase_idx];
+        for tuple_indices in indices {
+            for (tuple_idx, &index) in tuple_indices.iter().enumerate() {
+                let visit_count = &mut phase_counts[tuple_idx][index as usize];
+                *visit_count = visit_count.saturating_add(1);
+                let visit_alpha = alpha / (*visit_count as f32);
+                phase_weights[tuple_idx][index as usize] +=
+                    clip_weight_update(visit_alpha * cumulative_td) * SYMMETRY_NORMALIZATION;
+            }
+        }
+    }
+
     fn accumulate_scaled_from(&mut self, other: &Self, scale: f32) -> Result<(), String> {
         if self.phase_count != other.phase_count {
             return Err(format!(
@@ -672,6 +742,13 @@ impl Default for TrainableNTuple {
 }
 
 impl TrainingNetwork for TrainableNTuple {
+    fn prepare_for_alpha_decay(&mut self, alpha_decay: AlphaDecayStrategy) -> Result<(), String> {
+        if alpha_decay.requires_visit_counts() {
+            self.ensure_visit_counts();
+        }
+        Ok(())
+    }
+
     fn evaluate(&self, board: &Board, is_black: bool) -> f32 {
         let phase_idx = self.phase_index(board);
         let indices = Self::compute_feature_indices(board, is_black);
@@ -692,6 +769,7 @@ impl TrainingNetwork for TrainableNTuple {
         cumulative_td: f32,
         next_player: Option<bool>,
         alpha: f32,
+        alpha_decay: AlphaDecayStrategy,
         lambda_: f32,
     ) -> (f32, f32) {
         let phase_idx = self.phase_index(board);
@@ -709,10 +787,12 @@ impl TrainingNetwork for TrainableNTuple {
             td_error
         };
 
-        self.apply_delta(
+        self.apply_delta_with_alpha_decay(
             phase_idx,
             &indices,
-            clip_weight_update(alpha * next_cumulative_td),
+            alpha,
+            next_cumulative_td,
+            alpha_decay,
         );
         (current_value, next_cumulative_td)
     }
@@ -737,6 +817,7 @@ impl TrainingNetwork for TrainableNTuple {
         cumulative_td: f32,
         next_player: Option<bool>,
         alpha: f32,
+        alpha_decay: AlphaDecayStrategy,
         lambda_: f32,
     ) -> (f32, f32) {
         let current_value = self.sum_feature_indices(phase_idx, feature_indices);
@@ -752,10 +833,12 @@ impl TrainingNetwork for TrainableNTuple {
             td_error
         };
 
-        self.apply_delta(
+        self.apply_delta_with_alpha_decay(
             phase_idx,
             feature_indices,
-            clip_weight_update(alpha * next_cumulative_td),
+            alpha,
+            next_cumulative_td,
+            alpha_decay,
         );
         (current_value, next_cumulative_td)
     }
@@ -810,6 +893,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         seed: u64,
         random_opening_plies: usize,
     ) -> Result<Self, String> {
+        let mut network = network;
         if alpha < 0.0 {
             return Err(format!("alpha must be >= 0.0, got {alpha}"));
         }
@@ -819,6 +903,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
         if !(0.0..=1.0).contains(&epsilon) {
             return Err(format!("epsilon must be in [0.0, 1.0], got {epsilon}"));
         }
+        network.prepare_for_alpha_decay(alpha_decay)?;
 
         Ok(Self {
             network,
@@ -1240,6 +1325,7 @@ impl<N: TrainingNetwork> TDLambdaTrainer<N> {
                 cumulative_td,
                 next_player,
                 self.current_alpha(),
+                self.alpha_decay,
                 self.lambda_,
             );
             cumulative_td = ensure_finite(next_cumulative_td, "td-lambda cumulative_td")?;
@@ -1449,6 +1535,12 @@ fn train_network(
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<TrainableNTuple, String> {
+    if alpha_decay.requires_visit_counts() && initial_model.is_some() {
+        return Err(
+            "inverse_visit alpha decay cannot resume from an existing model because visit counts are not serialized"
+                .to_string(),
+        );
+    }
     let base_network = if let Some(bytes) = initial_model {
         TrainableNTuple::from_bytes(bytes)?
     } else {
@@ -2156,6 +2248,10 @@ mod tests {
             AlphaDecayStrategy::from_name("inverse_game").unwrap(),
             AlphaDecayStrategy::InverseGame
         );
+        assert_eq!(
+            AlphaDecayStrategy::from_name("inverse_visit").unwrap(),
+            AlphaDecayStrategy::InverseVisit
+        );
         assert!(AlphaDecayStrategy::from_name("linear").is_err());
     }
 
@@ -2177,6 +2273,71 @@ mod tests {
             AlphaDecayStrategy::InverseGame.alpha_for_completed_games(0.5, 0, 4),
             0.1
         );
+        assert_eq!(
+            AlphaDecayStrategy::InverseVisit.alpha_for_completed_games(0.5, 5, 9),
+            0.5
+        );
+    }
+
+    #[test]
+    fn inverse_visit_alpha_decay_halves_repeated_updates_for_same_weight() {
+        let mut network = TrainableNTuple::new();
+        network
+            .prepare_for_alpha_decay(AlphaDecayStrategy::InverseVisit)
+            .unwrap();
+        let board = Board::new();
+        let phase_idx = phase_index_for_board(&board, PHASE_COUNT);
+        let indices = TrainableNTuple::compute_feature_indices(&board, true);
+        let first_index = indices[0][0] as usize;
+
+        network.apply_delta_with_alpha_decay(
+            phase_idx,
+            &indices,
+            0.5,
+            1.0,
+            AlphaDecayStrategy::InverseVisit,
+        );
+        let first_value = network.weights[phase_idx][0][first_index];
+        let first_visits =
+            network.visit_counts.as_ref().unwrap()[phase_idx][0][first_index] as usize;
+
+        network.apply_delta_with_alpha_decay(
+            phase_idx,
+            &indices,
+            0.5,
+            1.0,
+            AlphaDecayStrategy::InverseVisit,
+        );
+        let second_increment = network.weights[phase_idx][0][first_index] - first_value;
+        let second_visits =
+            network.visit_counts.as_ref().unwrap()[phase_idx][0][first_index] as usize;
+
+        assert!(first_visits > 0);
+        assert_eq!(second_visits, first_visits * 2);
+        assert!(first_value > 0.0);
+        assert!(second_increment > 0.0);
+        assert!(second_increment < first_value);
+    }
+
+    #[test]
+    fn inverse_visit_alpha_decay_rejects_resume_models() {
+        let checkpoint = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
+        let err = train_to_bytes_with_alpha_decay(
+            1,
+            0.01,
+            AlphaDecayStrategy::InverseVisit,
+            0,
+            0.7,
+            0.1,
+            42,
+            1,
+            Some(&checkpoint),
+            0,
+            0,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("visit counts"));
     }
 
     #[test]
