@@ -9,6 +9,7 @@ const ZSTD_LEVEL: i32 = 19;
 const VERSION_V1: u32 = 1;
 const VERSION_V2: u32 = 2;
 const VERSION_V3: u32 = 3;
+const VERSION_V4: u32 = 4;
 const HEADER_SIZE: usize = 20;
 const BOARD_SIZE: usize = 8;
 const BOARD_CELLS: usize = BOARD_SIZE * BOARD_SIZE;
@@ -85,7 +86,7 @@ impl NTupleEvaluator {
                 }
                 (count, SymmetryMode::Rotations4)
             }
-            VERSION_V3 => {
+            VERSION_V3 | VERSION_V4 => {
                 let count = read_u32_le(data, 16)? as usize;
                 if count == 0 {
                     return Err("phase_count must be greater than 0".to_string());
@@ -94,7 +95,7 @@ impl NTupleEvaluator {
             }
             _ => {
                 return Err(format!(
-                    "unsupported weights version: expected {VERSION_V1}, {VERSION_V2}, or {VERSION_V3}, got {version}"
+                    "unsupported weights version: expected {VERSION_V1}, {VERSION_V2}, {VERSION_V3}, or {VERSION_V4}, got {version}"
                 ));
             }
         };
@@ -168,6 +169,23 @@ impl NTupleEvaluator {
                 phase_weights.push(tuple_weights);
             }
             weights.push(phase_weights);
+        }
+
+        if version == VERSION_V4 {
+            for phase_idx in 0..phase_count {
+                for (tuple_idx, tuple) in tuples.iter().enumerate() {
+                    let entries = pow3(tuple.len())?;
+                    let bytes_len = entries
+                        .checked_mul(4)
+                        .ok_or_else(|| "visit count byte length overflow".to_string())?;
+                    if offset + bytes_len > payload.len() {
+                        return Err(format!(
+                            "unexpected EOF while reading visit counts for phase #{phase_idx}, tuple #{tuple_idx}"
+                        ));
+                    }
+                    offset += bytes_len;
+                }
+            }
         }
 
         if offset != payload.len() {
@@ -285,6 +303,14 @@ mod tests {
         build_weights_blob(VERSION_V3, tuples, phase_weights, phase_count)
     }
 
+    fn build_weights_blob_v4(
+        tuples: &[Vec<u8>],
+        phase_weights: &[Vec<Vec<f32>>],
+        phase_count: u32,
+    ) -> Vec<u8> {
+        build_weights_blob(VERSION_V4, tuples, phase_weights, phase_count)
+    }
+
     fn build_weights_blob(
         version: u32,
         tuples: &[Vec<u8>],
@@ -311,6 +337,15 @@ mod tests {
             for tuple_weights in weights {
                 for value in tuple_weights {
                     payload.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+        if version == VERSION_V4 {
+            for weights in phase_weights {
+                for tuple_weights in weights {
+                    for _ in tuple_weights {
+                        payload.extend_from_slice(&0u32.to_le_bytes());
+                    }
                 }
             }
         }
@@ -381,6 +416,23 @@ mod tests {
             vec![vec![10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0]],
         ];
         let bytes = build_weights_blob_v3(&tuples, &phase_weights, 2);
+
+        let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
+
+        assert_eq!(evaluator.tuples, tuples);
+        assert_eq!(evaluator.phase_count, 2);
+        assert_eq!(evaluator.weights, phase_weights);
+        assert_eq!(evaluator.symmetry_mode, SymmetryMode::Dihedral8);
+    }
+
+    #[test]
+    fn from_bytes_deserializes_v4_tuple_defs_and_ignores_visit_counts() {
+        let tuples = vec![vec![0, 1]];
+        let phase_weights = vec![
+            vec![vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]],
+            vec![vec![10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0]],
+        ];
+        let bytes = build_weights_blob_v4(&tuples, &phase_weights, 2);
 
         let evaluator = NTupleEvaluator::from_bytes(&bytes).expect("must parse");
 

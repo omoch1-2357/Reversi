@@ -16,6 +16,8 @@ from export_model import HEADER_SIZE, MAGIC, VERSION
 from ntuple import NTupleNetwork
 from rust_training import decompress_model_bytes, train_to_bytes
 
+SUPPORTED_MODEL_VERSIONS = (3, VERSION)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line interface for model training."""
@@ -191,8 +193,11 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
     )
     if magic != MAGIC:
         raise ValueError(f"invalid magic: expected {MAGIC!r}, got {magic!r}")
-    if version != VERSION:
-        raise ValueError(f"unsupported version: expected {VERSION}, got {version}")
+    if version not in SUPPORTED_MODEL_VERSIONS:
+        expected_versions = ", ".join(str(item) for item in SUPPORTED_MODEL_VERSIONS)
+        raise ValueError(
+            f"unsupported version: expected one of ({expected_versions}), got {version}"
+        )
     if num_tuples != len(tuple_patterns):
         raise ValueError(
             f"num_tuples mismatch: expected {len(tuple_patterns)}, got {num_tuples}"
@@ -252,6 +257,19 @@ def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -
                     )
             offset = end
 
+    if version >= 4:
+        for phase_idx in range(phase_count):
+            for tuple_idx, pattern in enumerate(tuple_patterns):
+                visit_count = 3 ** len(pattern)
+                required = visit_count * 4
+                end = offset + required
+                if end > len(data):
+                    raise ValueError(
+                        "visit counts truncated at phase "
+                        f"{phase_idx}, tuple index {tuple_idx}"
+                    )
+                offset = end
+
     if offset != len(data):
         raise ValueError(
             f"unexpected trailing bytes in model data: {len(data) - offset}"
@@ -298,16 +316,6 @@ def train_and_export(
     if alpha_decay_start_game < 0:
         raise ValueError(
             f"alpha_decay_start_game must be >= 0, got {alpha_decay_start_game}"
-        )
-    if alpha_decay == "inverse_visit" and checkpoint_interval > 0:
-        raise ValueError(
-            "inverse_visit alpha decay cannot be used with checkpoint_interval > 0 "
-            "because visit counts are not serialized"
-        )
-    if alpha_decay == "inverse_visit" and resume_from is not None:
-        raise ValueError(
-            "inverse_visit alpha decay cannot resume from an existing model "
-            "because visit counts are not serialized"
         )
     if progress_interval < 0:
         raise ValueError(f"progress_interval must be >= 0, got {progress_interval}")

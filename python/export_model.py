@@ -10,7 +10,7 @@ from ntuple import NTupleNetwork
 from rust_training import compress_model_bytes
 
 MAGIC = b"NTRV"
-VERSION = 3
+VERSION = 4
 HEADER_SIZE = 20
 
 
@@ -48,6 +48,11 @@ def _build_data_section(ntuple: NTupleNetwork) -> bytes:
                 )
             for weight in weights:
                 data.extend(struct.pack("<f", float(weight)))
+
+    for _phase_idx in range(ntuple.PHASE_COUNT):
+        for pattern in ntuple.TUPLE_PATTERNS:
+            for _ in range(3 ** len(pattern)):
+                data.extend(struct.pack("<I", 0))
 
     return bytes(data)
 

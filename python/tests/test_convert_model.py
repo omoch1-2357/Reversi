@@ -68,9 +68,17 @@ def test_convert_model_to_v3_rewrites_version_and_scales_weights() -> None:
         first_weight = struct.unpack_from("<f", payload, offset)[0]
         assert first_weight == pytest.approx(2.0 * LEGACY_SCALE)
 
-        last_weight_offset = len(payload) - 4
+        last_weight_offset = offset
+        for phase in ntuple.weights[:phase_count]:
+            for weights in phase:
+                last_weight_offset += len(weights) * 4
+        last_weight_offset -= 4
         last_weight = struct.unpack_from("<f", payload, last_weight_offset)[0]
         assert last_weight == pytest.approx(-6.0 * LEGACY_SCALE)
+
+        visit_count_offset = last_weight_offset + 4
+        visit_count = struct.unpack_from("<I", payload, visit_count_offset)[0]
+        assert visit_count == 0
     finally:
         src.unlink(missing_ok=True)
         dst.unlink(missing_ok=True)

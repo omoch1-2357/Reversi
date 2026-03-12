@@ -73,4 +73,13 @@ def test_export_model_binary_length_matches_tuple_and_weight_layout() -> None:
                 assert raw == struct.pack("<f", expected_value)
                 offset += 4
 
+    for phase_idx in range(ntuple.PHASE_COUNT):
+        for pattern_idx, pattern in enumerate(ntuple.TUPLE_PATTERNS):
+            expected_len = 3 ** len(pattern)
+            for _weight_idx in range(expected_len):
+                raw = payload[offset : offset + 4]
+                value = struct.unpack("<I", raw)[0]
+                assert value == 0
+                offset += 4
+
     assert offset == len(payload)

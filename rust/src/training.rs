@@ -29,7 +29,9 @@ pub const TUPLE_PATTERNS: &[&[u8]] = &[
 ];
 
 const MAGIC: &[u8; 4] = b"NTRV";
-const VERSION: u32 = 3;
+const VERSION_V3: u32 = 3;
+const VERSION_V4: u32 = 4;
+const VERSION: u32 = VERSION_V4;
 const HEADER_SIZE: usize = 20;
 const SYMMETRY_COUNT: usize = 8;
 const TUPLE_COUNT: usize = 14;
@@ -277,7 +279,28 @@ impl TrainableNTuple {
                     .sum::<usize>()
             })
             .sum();
-        let mut data = Vec::with_capacity(tuple_defs_len + weights_bytes);
+        let visit_counts = self
+            .visit_counts
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(Self::zero_visit_counts);
+        if visit_counts.len() != self.phase_count {
+            return Err(format!(
+                "visit_counts phase length must match phase_count: expected {}, got {}",
+                self.phase_count,
+                visit_counts.len()
+            ));
+        }
+        let visit_count_bytes: usize = visit_counts
+            .iter()
+            .map(|phase_counts| {
+                phase_counts
+                    .iter()
+                    .map(|counts| counts.len() * std::mem::size_of::<u32>())
+                    .sum::<usize>()
+            })
+            .sum();
+        let mut data = Vec::with_capacity(tuple_defs_len + weights_bytes + visit_count_bytes);
 
         for pattern in TUPLE_PATTERNS {
             data.push(pattern.len() as u8);
@@ -306,6 +329,27 @@ impl TrainableNTuple {
                         ));
                     }
                     data.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+
+        for (phase_idx, phase_counts) in visit_counts.iter().enumerate() {
+            if phase_counts.len() != TUPLE_PATTERNS.len() {
+                return Err(format!(
+                    "visit_counts[{phase_idx}] tuple length must match tuple patterns length"
+                ));
+            }
+
+            for (tuple_idx, counts) in phase_counts.iter().enumerate() {
+                let expected_len = pow3(TUPLE_PATTERNS[tuple_idx].len())?;
+                if counts.len() != expected_len {
+                    return Err(format!(
+                        "visit_counts[{phase_idx}][{tuple_idx}] length must be {expected_len}, got {}",
+                        counts.len()
+                    ));
+                }
+                for count in counts {
+                    data.extend_from_slice(&count.to_le_bytes());
                 }
             }
         }
@@ -344,6 +388,7 @@ impl TrainableNTuple {
                 continue;
             }
             merged.accumulate_scaled_from(network, (*games as f32) / (total_games as f32))?;
+            merged.accumulate_visit_counts_from(network)?;
         }
 
         Ok(merged)
@@ -365,8 +410,8 @@ impl TrainableNTuple {
         let merge_threads = threads.min(PHASE_COUNT);
         let phase_ranges = split_games(PHASE_COUNT, merge_threads);
 
-        let merged_phases =
-            std::thread::scope(|scope| -> Result<Vec<(usize, Vec<Vec<f32>>)>, String> {
+        let merged_phases = std::thread::scope(
+            |scope| -> Result<Vec<(usize, Vec<Vec<f32>>, Option<Vec<Vec<u32>>>)>, String> {
                 let mut handles = Vec::with_capacity(merge_threads);
                 let mut start_phase = 0usize;
 
@@ -380,7 +425,7 @@ impl TrainableNTuple {
                     let scales = &scales;
 
                     handles.push(scope.spawn(
-                        move || -> Result<Vec<(usize, Vec<Vec<f32>>)>, String> {
+                        move || -> Result<Vec<(usize, Vec<Vec<f32>>, Option<Vec<Vec<u32>>>)>, String> {
                             let mut phases = Vec::with_capacity(phase_count);
                             for phase_idx in phase_start..(phase_start + phase_count) {
                                 let mut phase_weights: Vec<Vec<f32>> = TUPLE_PATTERNS
@@ -409,7 +454,40 @@ impl TrainableNTuple {
                                     }
                                 }
 
-                                phases.push((phase_idx, phase_weights));
+                                let mut phase_counts: Option<Vec<Vec<u32>>> = None;
+                                for (network, games) in workers.iter() {
+                                    if *games == 0 {
+                                        continue;
+                                    }
+                                    let Some(source_counts) = network.visit_counts.as_ref() else {
+                                        continue;
+                                    };
+                                    let target_counts = phase_counts.get_or_insert_with(|| {
+                                        TUPLE_PATTERNS
+                                            .iter()
+                                            .map(|pattern| {
+                                                vec![
+                                                    0u32;
+                                                    pow3(pattern.len())
+                                                        .expect("tuple size must fit usize")
+                                                ]
+                                            })
+                                            .collect()
+                                    });
+                                    for (target_tuple_counts, source_tuple_counts) in target_counts
+                                        .iter_mut()
+                                        .zip(source_counts[phase_idx].iter())
+                                    {
+                                        for (target, source) in target_tuple_counts
+                                            .iter_mut()
+                                            .zip(source_tuple_counts.iter())
+                                        {
+                                            *target = target.saturating_add(*source);
+                                        }
+                                    }
+                                }
+
+                                phases.push((phase_idx, phase_weights, phase_counts));
                             }
                             Ok(phases)
                         },
@@ -424,11 +502,19 @@ impl TrainableNTuple {
                     merged.extend(phases);
                 }
                 Ok(merged)
-            })?;
+            },
+        )?;
 
         let mut merged = Self::new();
-        for (phase_idx, phase_weights) in merged_phases {
+        for (phase_idx, phase_weights, phase_counts) in merged_phases {
             merged.weights[phase_idx] = phase_weights;
+            if let Some(phase_counts) = phase_counts {
+                merged.ensure_visit_counts();
+                merged
+                    .visit_counts
+                    .as_mut()
+                    .expect("visit counts must exist")[phase_idx] = phase_counts;
+            }
         }
         Ok(merged)
     }
@@ -450,9 +536,9 @@ impl TrainableNTuple {
         }
 
         let version = read_u32_le(data, 4)?;
-        if version != VERSION {
+        if version != VERSION_V3 && version != VERSION_V4 {
             return Err(format!(
-                "unsupported training weights version: expected {VERSION}, got {version}"
+                "unsupported training weights version: expected {VERSION_V3} or {VERSION_V4}, got {version}"
             ));
         }
 
@@ -549,6 +635,39 @@ impl TrainableNTuple {
             weights.push(phase_weights);
         }
 
+        let visit_counts = if version == VERSION_V4 {
+            let mut phase_counts_all = Vec::with_capacity(PHASE_COUNT);
+            for phase_idx in 0..PHASE_COUNT {
+                let mut phase_counts = Vec::with_capacity(TUPLE_PATTERNS.len());
+                for (tuple_idx, pattern) in TUPLE_PATTERNS.iter().enumerate() {
+                    let entries = pow3(pattern.len())?;
+                    let bytes_len = entries
+                        .checked_mul(std::mem::size_of::<u32>())
+                        .ok_or_else(|| "visit count byte length overflow".to_string())?;
+                    if offset + bytes_len > payload.len() {
+                        return Err(format!(
+                            "unexpected EOF while reading visit counts for phase #{phase_idx}, tuple #{tuple_idx}"
+                        ));
+                    }
+
+                    let mut tuple_counts = Vec::with_capacity(entries);
+                    for entry_idx in 0..entries {
+                        let start = offset + entry_idx * std::mem::size_of::<u32>();
+                        let mut chunk = [0u8; 4];
+                        chunk.copy_from_slice(&payload[start..start + 4]);
+                        tuple_counts.push(u32::from_le_bytes(chunk));
+                    }
+
+                    phase_counts.push(tuple_counts);
+                    offset += bytes_len;
+                }
+                phase_counts_all.push(phase_counts);
+            }
+            Some(phase_counts_all)
+        } else {
+            None
+        };
+
         if offset != payload.len() {
             return Err("weights payload has trailing bytes".to_string());
         }
@@ -556,7 +675,7 @@ impl TrainableNTuple {
         Ok(Self {
             phase_count,
             weights,
-            visit_counts: None,
+            visit_counts,
         })
     }
 
@@ -731,6 +850,42 @@ impl TrainableNTuple {
             }
         }
 
+        Ok(())
+    }
+
+    fn accumulate_visit_counts_from(&mut self, other: &Self) -> Result<(), String> {
+        let Some(other_counts) = other.visit_counts.as_ref() else {
+            return Ok(());
+        };
+        self.ensure_visit_counts();
+        let target_counts = self.visit_counts.as_mut().expect("visit counts must exist");
+        for (phase_idx, (target_phase, source_phase)) in target_counts
+            .iter_mut()
+            .zip(other_counts.iter())
+            .enumerate()
+        {
+            if target_phase.len() != source_phase.len() {
+                return Err(format!(
+                    "visit count tuple length mismatch while merging phase {phase_idx}: {} vs {}",
+                    target_phase.len(),
+                    source_phase.len()
+                ));
+            }
+            for (tuple_idx, (target_tuple, source_tuple)) in
+                target_phase.iter_mut().zip(source_phase.iter()).enumerate()
+            {
+                if target_tuple.len() != source_tuple.len() {
+                    return Err(format!(
+                        "visit count length mismatch while merging phase {phase_idx}, tuple {tuple_idx}: {} vs {}",
+                        target_tuple.len(),
+                        source_tuple.len()
+                    ));
+                }
+                for (target, source) in target_tuple.iter_mut().zip(source_tuple.iter()) {
+                    *target = target.saturating_add(*source);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1535,12 +1690,6 @@ fn train_network(
     progress_interval: usize,
     progress_callback: Option<ProgressCallback<'_>>,
 ) -> Result<TrainableNTuple, String> {
-    if alpha_decay.requires_visit_counts() && initial_model.is_some() {
-        return Err(
-            "inverse_visit alpha decay cannot resume from an existing model because visit counts are not serialized"
-                .to_string(),
-        );
-    }
     let base_network = if let Some(bytes) = initial_model {
         TrainableNTuple::from_bytes(bytes)?
     } else {
@@ -2176,7 +2325,7 @@ mod tests {
     }
 
     #[test]
-    fn train_to_bytes_writes_v3_header_with_phase_count() {
+    fn train_to_bytes_writes_v4_header_with_phase_count() {
         let bytes = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
         let bytes = decompress_model_bytes(&bytes).unwrap();
         assert_eq!(&bytes[0..4], MAGIC);
@@ -2320,9 +2469,35 @@ mod tests {
     }
 
     #[test]
-    fn inverse_visit_alpha_decay_rejects_resume_models() {
-        let checkpoint = train_to_bytes(0, 0.01, 0.7, 0.1, 42, 1, None, 0, 0, None).unwrap();
-        let err = train_to_bytes_with_alpha_decay(
+    fn inverse_visit_alpha_decay_serializes_visit_counts_and_supports_resume() {
+        let checkpoint = train_to_bytes_with_alpha_decay(
+            1,
+            0.01,
+            AlphaDecayStrategy::InverseVisit,
+            0,
+            0.7,
+            0.1,
+            42,
+            1,
+            None,
+            0,
+            0,
+            None,
+        )
+        .unwrap();
+        let loaded = TrainableNTuple::from_bytes(&checkpoint).unwrap();
+        let total_visits: u64 = loaded
+            .visit_counts
+            .as_ref()
+            .unwrap()
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|count| *count as u64)
+            .sum();
+        assert!(total_visits > 0);
+
+        let resumed = train_to_bytes_with_alpha_decay(
             1,
             0.01,
             AlphaDecayStrategy::InverseVisit,
@@ -2336,8 +2511,18 @@ mod tests {
             0,
             None,
         )
-        .unwrap_err();
-        assert!(err.contains("visit counts"));
+        .unwrap();
+        let resumed_loaded = TrainableNTuple::from_bytes(&resumed).unwrap();
+        let resumed_total_visits: u64 = resumed_loaded
+            .visit_counts
+            .as_ref()
+            .unwrap()
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|count| *count as u64)
+            .sum();
+        assert!(resumed_total_visits >= total_visits);
     }
 
     #[test]

@@ -238,31 +238,76 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         checkpoint_dir.rmdir()
 
 
-def test_train_and_export_rejects_inverse_visit_with_checkpoints() -> None:
+def test_train_and_export_supports_inverse_visit_with_checkpoints(monkeypatch) -> None:
     output = _output_path("_generated_inverse_visit_checkpoint_weights.bin")
+    resume = _output_path("_resume_inverse_visit_checkpoint_weights.bin")
+    checkpoint_dir = OUTPUT_DIR / "_inverse_visit_checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
+    for path in checkpoint_dir.glob("*"):
+        path.unlink()
+
+    seed_model = train_and_export(
+        games=0,
+        alpha=0.01,
+        lambda_=0.7,
+        epsilon=0.1,
+        output=resume,
+        seed=42,
+        threads=1,
+        random_opening_plies=0,
+        alpha_decay="inverse_visit",
+        alpha_decay_start_game=0,
+        progress_interval=0,
+        checkpoint_interval=0,
+        checkpoint_dir=None,
+        resume_from=None,
+        status_file=None,
+        verify=True,
+    )
+    resume_bytes = seed_model.read_bytes()
+    calls: list[dict[str, object]] = []
+
+    def _train_to_bytes(**kwargs):
+        calls.append(kwargs)
+        callback = kwargs["progress_callback"]
+        callback(kwargs["games"], kwargs["games"], 0.0)
+        return resume_bytes
+
+    monkeypatch.setattr("train.train_to_bytes", _train_to_bytes)
 
     try:
-        with pytest.raises(ValueError, match="visit counts are not serialized"):
-            train_and_export(
-                games=5,
-                alpha=0.01,
-                lambda_=0.7,
-                epsilon=0.1,
-                output=output,
-                seed=42,
-                threads=1,
-                random_opening_plies=0,
-                alpha_decay="inverse_visit",
-                alpha_decay_start_game=0,
-                progress_interval=0,
-                checkpoint_interval=1,
-                checkpoint_dir=None,
-                resume_from=None,
-                status_file=None,
-                verify=True,
-            )
+        result = train_and_export(
+            games=3,
+            alpha=0.01,
+            lambda_=0.7,
+            epsilon=0.1,
+            output=output,
+            seed=42,
+            threads=1,
+            random_opening_plies=0,
+            alpha_decay="inverse_visit",
+            alpha_decay_start_game=0,
+            progress_interval=0,
+            checkpoint_interval=1,
+            checkpoint_dir=checkpoint_dir,
+            resume_from=resume,
+            status_file=None,
+            verify=True,
+        )
+
+        assert result == output
+        assert [call["games"] for call in calls] == [1, 1, 1]
+        assert all(call["alpha_decay"] == "inverse_visit" for call in calls)
+        assert all(call["initial_model"] == resume_bytes for call in calls)
+        checkpoints = sorted(checkpoint_dir.glob("*.bin"))
+        assert len(checkpoints) == 3
+        assert output.exists()
     finally:
         output.unlink(missing_ok=True)
+        resume.unlink(missing_ok=True)
+        for path in checkpoint_dir.glob("*"):
+            path.unlink()
+        checkpoint_dir.rmdir()
 
 
 def test_main_writes_failed_status_file(monkeypatch) -> None:

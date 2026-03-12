@@ -1,4 +1,4 @@
-"""Convert legacy Reversi weights.bin models to version 3."""
+"""Convert legacy Reversi weights.bin models to the latest version."""
 
 from __future__ import annotations
 
@@ -37,14 +37,14 @@ def _read_header(payload: bytes) -> tuple[int, int, int]:
 
 
 def convert_model_to_v3(input_path: str | Path, output_path: str | Path) -> Path:
-    """Convert a version 1/2 weights.bin file into version 3."""
+    """Convert a version 1/2/3 weights.bin file into the latest version."""
     payload = decompress_model_bytes(Path(input_path).read_bytes())
     version, num_tuples, reserved = _read_header(payload)
 
     if version == VERSION:
         Path(output_path).write_bytes(compress_model_bytes(payload))
         return Path(output_path)
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         raise ValueError(f"unsupported legacy version: {version}")
     if num_tuples != len(NTupleNetwork.TUPLE_PATTERNS):
         raise ValueError(
@@ -75,13 +75,20 @@ def convert_model_to_v3(input_path: str | Path, output_path: str | Path) -> Path
         data.extend(positions)
         offset += tuple_size
 
+    scale = LEGACY_SCALE if version in (1, 2) else 1.0
+
     for _phase in range(phase_count):
         for pattern in NTupleNetwork.TUPLE_PATTERNS:
             weight_count = 3 ** len(pattern)
             for _ in range(weight_count):
                 weight = struct.unpack_from("<f", payload, offset)[0]
-                data.extend(struct.pack("<f", weight * LEGACY_SCALE))
+                data.extend(struct.pack("<f", weight * scale))
                 offset += 4
+
+    for _phase in range(phase_count):
+        for pattern in NTupleNetwork.TUPLE_PATTERNS:
+            for _ in range(3 ** len(pattern)):
+                data.extend(struct.pack("<I", 0))
 
     if offset != len(payload):
         raise ValueError(
@@ -102,7 +109,7 @@ def convert_model_to_v3(input_path: str | Path, output_path: str | Path) -> Path
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert Reversi weights.bin to version 3."
+        description="Convert Reversi weights.bin to the latest version."
     )
     parser.add_argument("input", type=Path, help="Input weights.bin path")
     parser.add_argument("output", type=Path, help="Output weights.bin path")
