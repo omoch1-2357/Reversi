@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 import struct
@@ -82,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional existing weights.bin to continue training from.",
     )
     parser.add_argument(
+        "--status-file",
+        type=Path,
+        default=None,
+        help="Optional JSON file updated with the latest training status.",
+    )
+    parser.add_argument(
         "--verify",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -99,6 +106,59 @@ def log_training_progress(completed: int, total: int, elapsed_seconds: float) ->
         f"({progress_percent:.1f}%) elapsed={elapsed_seconds:.1f}s "
         f"rate={games_per_second:.2f} games/s"
     )
+
+
+def write_status_file(
+    path: Path | None,
+    *,
+    state: str,
+    completed_games: int,
+    total_games: int,
+    elapsed_seconds: float,
+    output_path: Path,
+    seed: int,
+    threads: int,
+    progress_interval: int,
+    checkpoint_interval: int,
+    random_opening_plies: int,
+    resume_from: Path | None,
+    last_checkpoint: Path | None = None,
+    error: str | None = None,
+) -> None:
+    """Persist the latest training status in an easy-to-tail JSON file."""
+    if path is None:
+        return
+
+    progress_percent = (
+        100.0 if total_games == 0 else (completed_games / total_games) * 100.0
+    )
+    games_per_second = (
+        0.0 if elapsed_seconds <= 0.0 else completed_games / elapsed_seconds
+    )
+    status = {
+        "state": state,
+        "completed_games": completed_games,
+        "total_games": total_games,
+        "progress_percent": round(progress_percent, 3),
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "games_per_second": round(games_per_second, 3),
+        "output_path": str(output_path),
+        "seed": seed,
+        "threads": threads,
+        "progress_interval": progress_interval,
+        "checkpoint_interval": checkpoint_interval,
+        "random_opening_plies": random_opening_plies,
+        "resume_from": str(resume_from) if resume_from is not None else None,
+        "last_checkpoint": str(last_checkpoint)
+        if last_checkpoint is not None
+        else None,
+        "error": error,
+    }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n")
+    temp_path.replace(path)
 
 
 def verify_exported_model(path: Path, tuple_patterns: Sequence[Sequence[int]]) -> None:
@@ -204,6 +264,7 @@ def train_and_export(
     checkpoint_interval: int,
     checkpoint_dir: Path | None,
     resume_from: Path | None,
+    status_file: Path | None,
     verify: bool,
 ) -> Path:
     """Run training, export the model, and validate the resulting binary."""
@@ -223,10 +284,42 @@ def train_and_export(
     output_path = output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     current_model = None
+    started_at = perf_counter()
+    last_checkpoint_path: Path | None = None
+
+    def emit_status(
+        completed_games: int,
+        *,
+        state: str,
+        error: str | None = None,
+    ) -> None:
+        write_status_file(
+            status_file,
+            state=state,
+            completed_games=completed_games,
+            total_games=games,
+            elapsed_seconds=perf_counter() - started_at,
+            output_path=output_path,
+            seed=seed,
+            threads=threads,
+            progress_interval=progress_interval,
+            checkpoint_interval=checkpoint_interval,
+            random_opening_plies=random_opening_plies,
+            resume_from=resume_from,
+            last_checkpoint=last_checkpoint_path,
+            error=error,
+        )
+
     if resume_from is not None:
         if verify:
             verify_exported_model(resume_from, NTupleNetwork.TUPLE_PATTERNS)
         current_model = resume_from.read_bytes()
+
+    emit_status(0, state="starting")
+
+    def on_progress(completed: int, total: int, elapsed_seconds: float) -> None:
+        log_training_progress(completed, total, elapsed_seconds)
+        emit_status(completed, state="running")
 
     if checkpoint_interval == 0 or games == 0:
         model_bytes = train_to_bytes(
@@ -239,11 +332,12 @@ def train_and_export(
             initial_model=current_model,
             random_opening_plies=random_opening_plies,
             progress_interval=progress_interval,
-            progress_callback=log_training_progress,
+            progress_callback=on_progress,
         )
         output_path.write_bytes(model_bytes)
         if verify:
             verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
+        emit_status(games, state="completed")
         return output_path
 
     resolved_checkpoint_dir = checkpoint_dir
@@ -252,7 +346,6 @@ def train_and_export(
     resolved_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     completed_games = 0
-    started_at = perf_counter()
     while completed_games < games:
         chunk_games = min(checkpoint_interval, games - completed_games)
 
@@ -262,6 +355,7 @@ def train_and_export(
                 games,
                 perf_counter() - started_at,
             )
+            emit_status(completed_games + done, state="running")
 
         current_model = train_to_bytes(
             games=chunk_games,
@@ -285,20 +379,22 @@ def train_and_export(
             completed_games,
         )
         checkpoint_path.write_bytes(current_model)
+        last_checkpoint_path = checkpoint_path
         if verify:
             verify_exported_model(checkpoint_path, NTupleNetwork.TUPLE_PATTERNS)
+        emit_status(completed_games, state="running")
 
     output_path.write_bytes(current_model)
     if verify:
         verify_exported_model(output_path, NTupleNetwork.TUPLE_PATTERNS)
+    emit_status(games, state="completed")
     return output_path
 
 
 def main(argv: list[str] | None = None) -> int:
     """Execute CLI workflow for training and exporting weights.bin."""
+    args = build_parser().parse_args(argv)
     try:
-        args = build_parser().parse_args(argv)
-
         print(
             "Training with "
             f"games={args.games}, alpha={args.alpha}, lambda={args.lambda_}, "
@@ -306,7 +402,8 @@ def main(argv: list[str] | None = None) -> int:
             f"progress_interval={args.progress_interval}, "
             f"random_opening_plies={args.random_opening_plies}, "
             f"checkpoint_interval={args.checkpoint_interval}, "
-            f"resume_from={args.resume_from}, verify={args.verify}"
+            f"resume_from={args.resume_from}, status_file={args.status_file}, "
+            f"verify={args.verify}"
         )
         start_time = perf_counter()
         output_path = train_and_export(
@@ -322,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_interval=args.checkpoint_interval,
             checkpoint_dir=args.checkpoint_dir,
             resume_from=args.resume_from,
+            status_file=args.status_file,
             verify=args.verify,
         )
         print(
@@ -330,6 +428,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except Exception as exc:
+        write_status_file(
+            args.status_file,
+            state="failed",
+            completed_games=0,
+            total_games=args.games,
+            elapsed_seconds=0.0,
+            output_path=args.output,
+            seed=args.seed,
+            threads=args.threads,
+            progress_interval=args.progress_interval,
+            checkpoint_interval=args.checkpoint_interval,
+            random_opening_plies=args.random_opening_plies,
+            resume_from=args.resume_from,
+            error=str(exc),
+        )
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

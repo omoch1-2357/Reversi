@@ -1,3 +1,4 @@
+import json
 import struct
 import zlib
 from pathlib import Path
@@ -46,6 +47,8 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
             "checkpoints",
             "--resume-from",
             "resume.bin",
+            "--status-file",
+            "status.json",
             "--no-verify",
         ]
     )
@@ -62,6 +65,7 @@ def test_parser_supports_phase_2_6_cli_options() -> None:
     assert args.checkpoint_interval == 50
     assert str(args.checkpoint_dir) == "checkpoints"
     assert str(args.resume_from) == "resume.bin"
+    assert str(args.status_file) == "status.json"
     assert args.verify is False
 
 
@@ -106,6 +110,7 @@ def test_verify_exported_model_detects_crc_mismatch() -> None:
 
 def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
     output = _output_path("_generated_progress_weights.bin")
+    status = _output_path("_generated_progress_status.json")
 
     try:
         exit_code = main(
@@ -118,6 +123,8 @@ def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
                 "42",
                 "--progress-interval",
                 "2",
+                "--status-file",
+                str(status),
             ]
         )
 
@@ -127,15 +134,23 @@ def test_main_emits_progress_logs(capsys: pytest.CaptureFixture[str]) -> None:
         assert "progress_interval=2" in captured.out
         assert "random_opening_plies=0" in captured.out
         assert "checkpoint_interval=0" in captured.out
+        assert f"status_file={status}" in captured.out
         assert "[progress] 2/3 games" in captured.out
         assert "[progress] 3/3 games" in captured.out
+        status_payload = json.loads(status.read_text())
+        assert status_payload["state"] == "completed"
+        assert status_payload["completed_games"] == 3
+        assert status_payload["total_games"] == 3
+        assert status_payload["output_path"] == str(output)
     finally:
         output.unlink(missing_ok=True)
+        status.unlink(missing_ok=True)
 
 
 def test_parser_defaults_threads_to_zero() -> None:
     args = build_parser().parse_args([])
     assert args.threads == 0
+    assert args.status_file is None
     assert args.verify is True
 
 
@@ -160,6 +175,7 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         checkpoint_interval=0,
         checkpoint_dir=None,
         resume_from=None,
+        status_file=None,
         verify=True,
     )
     resume_bytes = seed_model.read_bytes()
@@ -187,6 +203,7 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
             checkpoint_interval=2,
             checkpoint_dir=checkpoint_dir,
             resume_from=resume,
+            status_file=None,
             verify=True,
         )
 
@@ -203,3 +220,23 @@ def test_train_and_export_writes_checkpoints_and_resumes(monkeypatch) -> None:
         for path in checkpoint_dir.glob("*"):
             path.unlink()
         checkpoint_dir.rmdir()
+
+
+def test_main_writes_failed_status_file(monkeypatch) -> None:
+    status = _output_path("_generated_failed_status.json")
+
+    def _raise(**_kwargs):
+        raise RuntimeError("training exploded")
+
+    monkeypatch.setattr("train.train_and_export", _raise)
+
+    try:
+        exit_code = main(["--games", "5", "--status-file", str(status)])
+
+        assert exit_code == 1
+        status_payload = json.loads(status.read_text())
+        assert status_payload["state"] == "failed"
+        assert status_payload["total_games"] == 5
+        assert status_payload["error"] == "training exploded"
+    finally:
+        status.unlink(missing_ok=True)
